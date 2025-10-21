@@ -14,11 +14,16 @@ default:
 aqua-install:
 	aqua i -l
 
-up:
-	docker compose up -d
+ensure-docker-env:
+	@if [ ! -f docker/.env ]; then \
+		cp docker/.env.example docker/.env; \
+	fi
+
+up: ensure-docker-env
+	docker compose -f docker/docker-compose.yml --project-directory docker up -d --build
 
 down:
-	docker compose down -v
+	docker compose -f docker/docker-compose.yml --project-directory docker down -v
 
 obs-up:
 	docker compose -f docker/obs/docker-compose.yml up -d

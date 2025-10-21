@@ -8,6 +8,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev clang && rm -rf /var/lib/apt/lists/*
 
 COPY Cargo.toml .
+COPY Cargo.lock .
 COPY crates crates
 COPY migrations migrations
 COPY .config .config

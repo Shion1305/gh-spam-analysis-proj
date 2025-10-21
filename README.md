@@ -62,8 +62,7 @@ github-spam-lab/
      echo 'TEST_ADMIN_URL=postgres://postgres:postgres@localhost:5432/postgres'
    } > .env
    just aqua-install            # installs just, sqlx-cli, nextest, redis-cli, kcat, promtool
-   cp docker/.env.example docker/.env   # populate with real GitHub tokens & overrides
-   just up                      # docker compose up -d (Postgres + Adminer + API + Collector)
+   just up                      # docker compose up -d (auto-copies docker/.env.example on first run)
 
    # Postgres is seeded automatically (POSTGRES_DB), and the Rust apps run migrations on start-up.
    # No manual `just migrate` is required for local development.
@@ -88,7 +87,8 @@ github-spam-lab/
    #   - API service (http://localhost:3000)
    #   - Collector service
    # The collector requires GitHub REST tokens (`GITHUB__TOKEN_IDS` / `GITHUB__TOKEN_SECRETS`).
-   # Edit docker/.env before running `just up` or `docker compose up` directly.
+   # Edit docker/.env (auto-created from docker/.env.example) before running `just up`
+   # or adjust the compose environment to disable the collector if you only need the API locally.
    ```
 
 4. **Testing & linting**
@@ -173,8 +173,20 @@ github-spam-lab/
 ## Continuous Integration & Release
 
 - `.github/workflows/ci.yml` runs fmt, clippy (`-D warnings`), and `cargo nextest` against a Postgres service launched via Docker Compose. The workflow relies on the application's built-in migrations, so schema drift is caught automatically.
-- `.github/workflows/helm-publish.yml` packages `charts/github-spam-lab` and publishes chart artifacts to `gh-pages` upon a `chart-v*` tag. Artifacts are uploaded using `actions/upload-artifact@v4` and an index is generated for Helm repositories.
+- `.github/workflows/helm-publish.yml` packages `charts/github-spam-lab` and publishes an OCI chart to `ghcr.io/<owner>/charts`. The same workflow attaches the `.tgz` as a build artifact for manual download.
 - Set `DATABASE_URL`/`TEST_ADMIN_URL` secrets in self-hosted runners if you customize database credentials.
+
+### Installing from GHCR
+
+```bash
+helm upgrade --install github-spam-lab \
+  oci://ghcr.io/shion1305/charts/github-spam-lab \
+  --version 0.1.0 \
+  --set image.repository=ghcr.io/shion1305/gh-spam-analysis-proj \
+  --namespace github-spam --create-namespace
+```
+
+Override `GITHUB__TOKEN_IDS`/`GITHUB__TOKEN_SECRETS` and database settings via `--set` or a custom values file before deploying in a real cluster.
 
 ---
 

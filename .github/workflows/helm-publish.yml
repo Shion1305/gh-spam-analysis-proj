@@ -10,7 +10,8 @@ jobs:
   package-and-publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
       - name: Set up Helm
@@ -24,18 +25,15 @@ jobs:
           rm -rf dist
           mkdir -p dist
           helm package charts/github-spam-lab --destination dist
-          helm repo index dist --url https://shion1305.github.io/gh-spam-analysis-proj/charts
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: helm-chart
           path: dist/*.tgz
-      - name: Push chart to GitHub Pages
-        if: github.ref_type == 'tag'
-        uses: peaceiris/actions-gh-pages@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: dist
-          destination_dir: charts
-          keep_files: true
-          publish_branch: gh-pages
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+      - name: Push chart to GHCR
+        run: |
+          for chart in dist/*.tgz; do
+            helm push "$chart" oci://ghcr.io/${{ github.repository_owner }}/charts;
+          done
