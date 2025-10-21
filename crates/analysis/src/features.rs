@@ -96,7 +96,7 @@ fn count_mentions(text: &str) -> usize {
 
 fn count_emojis(text: &str) -> usize {
     text.chars()
-        .filter(|c| c.is_ascii_punctuation() == false && emojis::is_emoji(*c))
+        .filter(|c| !c.is_ascii_punctuation() && emojis::is_emoji(*c))
         .count()
 }
 

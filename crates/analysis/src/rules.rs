@@ -6,6 +6,12 @@ pub struct RuleOutcome {
     pub reasons: Vec<String>,
 }
 
+impl Default for RuleOutcome {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RuleOutcome {
     pub fn new() -> Self {
         Self {
@@ -109,8 +115,10 @@ mod tests {
 
     #[test]
     fn new_account_rule_triggers() {
-        let mut features = FeatureSet::default();
-        features.account_age_days = Some(2.0);
+        let features = FeatureSet {
+            account_age_days: Some(2.0),
+            ..Default::default()
+        };
         let stats = ContributionStats {
             posts_last_24h: 4,
             dedupe_hits_last_48h: 0,
