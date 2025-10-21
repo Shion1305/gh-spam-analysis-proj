@@ -1,9 +1,6 @@
 use chrono::{DateTime, Utc};
 use http::{header, HeaderMap, HeaderValue, Request};
-use serde::Deserialize;
-use std::str::FromStr;
 use std::time::Duration;
-use tracing::debug;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Budget {
@@ -51,7 +48,7 @@ impl Priority {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct GithubRequest {
     inner: Request<Vec<u8>>,
     pub budget: Budget,
@@ -59,8 +56,30 @@ pub struct GithubRequest {
     pub key: String,
 }
 
+impl Clone for GithubRequest {
+    fn clone(&self) -> Self {
+        let mut builder = Request::builder()
+            .method(self.inner.method().clone())
+            .uri(self.inner.uri().clone())
+            .version(self.inner.version());
+
+        for (key, value) in self.inner.headers().iter() {
+            builder = builder.header(key, value);
+        }
+
+        let inner = builder.body(self.inner.body().clone()).unwrap();
+
+        Self {
+            inner,
+            budget: self.budget,
+            priority: self.priority,
+            key: self.key.clone(),
+        }
+    }
+}
+
 impl GithubRequest {
-    pub fn new(mut inner: Request<Vec<u8>>, priority: Priority) -> anyhow::Result<Self> {
+    pub fn new(inner: Request<Vec<u8>>, priority: Priority) -> anyhow::Result<Self> {
         let resource_hdr = inner.headers().get("x-ratelimit-resource").cloned();
 
         let budget = Budget::classify(inner.uri().path(), resource_hdr.as_ref());
@@ -89,7 +108,7 @@ impl GithubRequest {
     }
 
     pub fn request(&self) -> Request<Vec<u8>> {
-        self.inner.clone()
+        self.clone().inner
     }
 
     pub fn headers_mut(&mut self) -> &mut http::HeaderMap {
@@ -129,8 +148,7 @@ pub fn parse_rate_limit(headers: &HeaderMap) -> Option<RateLimitUpdate> {
         .get("x-ratelimit-reset")
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.parse::<i64>().ok())?;
-    let reset =
-        DateTime::<Utc>::from_utc(chrono::NaiveDateTime::from_timestamp_opt(reset_ts, 0)?, Utc);
+    let reset = DateTime::from_timestamp(reset_ts, 0)?;
     Some(RateLimitUpdate {
         limit,
         remaining,
@@ -154,13 +172,13 @@ pub fn parse_retry_after(headers: &HeaderMap) -> Option<RetryAdvice> {
                 });
             }
             if let Ok(date) = httpdate::parse_http_date(value) {
-                let now = chrono::Utc::now();
-                let wait = date - now;
-                let dur = wait.to_std().unwrap_or_default();
-                return Some(RetryAdvice {
-                    wait: dur,
-                    reason: "retry_after_date",
-                });
+                let now = std::time::SystemTime::now();
+                if let Ok(wait) = date.duration_since(now) {
+                    return Some(RetryAdvice {
+                        wait,
+                        reason: "retry_after_date",
+                    });
+                }
             }
         }
     }
