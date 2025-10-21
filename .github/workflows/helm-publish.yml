@@ -21,9 +21,12 @@ jobs:
         run: helm lint charts/github-spam-lab
       - name: Package chart
         run: |
+          rm -rf dist
+          mkdir -p dist
           helm package charts/github-spam-lab --destination dist
+          helm repo index dist --url https://shion1305.github.io/gh-spam-analysis-proj/charts
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: helm-chart
           path: dist/*.tgz
@@ -35,3 +38,4 @@ jobs:
           publish_dir: dist
           destination_dir: charts
           keep_files: true
+          publish_branch: gh-pages
