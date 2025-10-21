@@ -48,6 +48,8 @@ jobs:
           tool: cargo-nextest
       - name: Install sqlx-cli
         run: cargo install sqlx-cli --locked --no-default-features --features rustls --force
+      - name: Run migrations
+        run: cargo sqlx migrate run
       - name: Run fmt
         run: cargo fmt -- --check
       - name: Run clippy
