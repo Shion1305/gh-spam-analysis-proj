@@ -1,0 +1,513 @@
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+use sqlx::{postgres::PgPoolOptions, PgPool, Postgres, QueryBuilder};
+use tracing::instrument;
+
+use crate::errors::{DbError, Result};
+use crate::models::{
+    CollectorWatermarkRow, CommentRow, IssueQuery, IssueRow, RepositoryRow, SpamFlagRow,
+    SpamFlagUpsert, UserRow, WatermarkUpdate,
+};
+use crate::repositories::{
+    CommentRepository, IssueRepository, RepoRepository, Repositories, SpamFlagsRepository,
+    UserRepository, WatermarkRepository,
+};
+
+pub async fn run_migrations(pool: &PgPool) -> Result<()> {
+    sqlx::migrate!("../migrations")
+        .run(pool)
+        .await
+        .map_err(DbError::Query)
+}
+
+#[derive(Clone)]
+pub struct PgDatabase {
+    pool: PgPool,
+    repo_repo: Arc<PgRepoRepository>,
+    user_repo: Arc<PgUserRepository>,
+    issue_repo: Arc<PgIssueRepository>,
+    comment_repo: Arc<PgCommentRepository>,
+    watermark_repo: Arc<PgWatermarkRepository>,
+    spam_repo: Arc<PgSpamFlagsRepository>,
+}
+
+impl PgDatabase {
+    pub async fn connect(database_url: &str) -> Result<Self> {
+        let pool = PgPoolOptions::new()
+            .max_connections(10)
+            .connect(database_url)
+            .await
+            .map_err(DbError::Query)?;
+
+        Ok(Self::from_pool(pool))
+    }
+
+    pub fn from_pool(pool: PgPool) -> Self {
+        let repo_repo = Arc::new(PgRepoRepository { pool: pool.clone() });
+        let user_repo = Arc::new(PgUserRepository { pool: pool.clone() });
+        let issue_repo = Arc::new(PgIssueRepository { pool: pool.clone() });
+        let comment_repo = Arc::new(PgCommentRepository { pool: pool.clone() });
+        let watermark_repo = Arc::new(PgWatermarkRepository { pool: pool.clone() });
+        let spam_repo = Arc::new(PgSpamFlagsRepository { pool: pool.clone() });
+
+        Self {
+            pool,
+            repo_repo,
+            user_repo,
+            issue_repo,
+            comment_repo,
+            watermark_repo,
+            spam_repo,
+        }
+    }
+
+    pub fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+}
+
+impl Repositories for PgDatabase {
+    fn repos(&self) -> &dyn RepoRepository {
+        &*self.repo_repo
+    }
+
+    fn users(&self) -> &dyn UserRepository {
+        &*self.user_repo
+    }
+
+    fn issues(&self) -> &dyn IssueRepository {
+        &*self.issue_repo
+    }
+
+    fn comments(&self) -> &dyn CommentRepository {
+        &*self.comment_repo
+    }
+
+    fn watermarks(&self) -> &dyn WatermarkRepository {
+        &*self.watermark_repo
+    }
+
+    fn spam_flags(&self) -> &dyn SpamFlagsRepository {
+        &*self.spam_repo
+    }
+}
+
+#[derive(Clone)]
+struct PgRepoRepository {
+    pool: PgPool,
+}
+
+#[async_trait]
+impl RepoRepository for PgRepoRepository {
+    #[instrument(skip(self, repo), fields(full_name = %repo.full_name))]
+    async fn upsert(&self, repo: RepositoryRow) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO repositories (id, full_name, is_fork, created_at, pushed_at, raw)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (id) DO UPDATE
+                SET full_name = EXCLUDED.full_name,
+                    is_fork = EXCLUDED.is_fork,
+                    created_at = EXCLUDED.created_at,
+                    pushed_at = EXCLUDED.pushed_at,
+                    raw = EXCLUDED.raw
+            "#,
+        )
+        .bind(repo.id)
+        .bind(repo.full_name)
+        .bind(repo.is_fork)
+        .bind(repo.created_at)
+        .bind(repo.pushed_at)
+        .bind(repo.raw)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(DbError::Query)
+    }
+
+    async fn get_by_full_name(&self, full_name: &str) -> Result<Option<RepositoryRow>> {
+        sqlx::query_as::<_, RepositoryRow>(
+            r#"
+            SELECT id, full_name, is_fork, created_at, pushed_at, raw
+            FROM repositories
+            WHERE full_name = $1
+            "#,
+        )
+        .bind(full_name)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(DbError::Query)
+    }
+
+    async fn list(&self, limit: i64) -> Result<Vec<RepositoryRow>> {
+        sqlx::query_as::<_, RepositoryRow>(
+            r#"
+            SELECT id, full_name, is_fork, created_at, pushed_at, raw
+            FROM repositories
+            ORDER BY full_name
+            LIMIT $1
+            "#,
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(DbError::Query)
+    }
+}
+
+#[derive(Clone)]
+struct PgUserRepository {
+    pool: PgPool,
+}
+
+#[async_trait]
+impl UserRepository for PgUserRepository {
+    async fn upsert(&self, user: UserRow) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO users (id, login, type, site_admin, created_at, followers, following, public_repos, raw)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            ON CONFLICT (id) DO UPDATE
+                SET login = EXCLUDED.login,
+                    type = EXCLUDED.type,
+                    site_admin = EXCLUDED.site_admin,
+                    created_at = EXCLUDED.created_at,
+                    followers = EXCLUDED.followers,
+                    following = EXCLUDED.following,
+                    public_repos = EXCLUDED.public_repos,
+                    raw = EXCLUDED.raw
+            "#
+        )
+        .bind(user.id)
+        .bind(user.login)
+        .bind(user.user_type)
+        .bind(user.site_admin)
+        .bind(user.created_at)
+        .bind(user.followers)
+        .bind(user.following)
+        .bind(user.public_repos)
+        .bind(user.raw)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(DbError::Query)
+    }
+
+    async fn get_by_id(&self, id: i64) -> Result<Option<UserRow>> {
+        sqlx::query_as::<_, UserRow>(
+            r#"
+            SELECT id, login, type as "user_type", site_admin, created_at, followers, following, public_repos, raw
+            FROM users
+            WHERE id = $1
+            "#
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(DbError::Query)
+    }
+
+    async fn get_by_login(&self, login: &str) -> Result<Option<UserRow>> {
+        sqlx::query_as::<_, UserRow>(
+            r#"
+            SELECT id, login, type as "user_type", site_admin, created_at, followers, following, public_repos, raw
+            FROM users
+            WHERE login = $1
+            "#
+        )
+        .bind(login)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(DbError::Query)
+    }
+}
+
+#[derive(Clone)]
+struct PgIssueRepository {
+    pool: PgPool,
+}
+
+#[async_trait]
+impl IssueRepository for PgIssueRepository {
+    async fn upsert(&self, issue: IssueRow) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO issues (
+                id, repo_id, number, is_pull_request, state, title, body, user_id,
+                comments_count, created_at, updated_at, closed_at, dedupe_hash, raw
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            ON CONFLICT (id) DO UPDATE
+                SET repo_id = EXCLUDED.repo_id,
+                    number = EXCLUDED.number,
+                    is_pull_request = EXCLUDED.is_pull_request,
+                    state = EXCLUDED.state,
+                    title = EXCLUDED.title,
+                    body = EXCLUDED.body,
+                    user_id = EXCLUDED.user_id,
+                    comments_count = EXCLUDED.comments_count,
+                    created_at = EXCLUDED.created_at,
+                    updated_at = EXCLUDED.updated_at,
+                    closed_at = EXCLUDED.closed_at,
+                    dedupe_hash = EXCLUDED.dedupe_hash,
+                    raw = EXCLUDED.raw
+            "#,
+        )
+        .bind(issue.id)
+        .bind(issue.repo_id)
+        .bind(issue.number)
+        .bind(issue.is_pull_request)
+        .bind(issue.state)
+        .bind(issue.title)
+        .bind(issue.body)
+        .bind(issue.user_id)
+        .bind(issue.comments_count)
+        .bind(issue.created_at)
+        .bind(issue.updated_at)
+        .bind(issue.closed_at)
+        .bind(issue.dedupe_hash)
+        .bind(issue.raw)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(DbError::Query)
+    }
+
+    async fn query(&self, query: IssueQuery) -> Result<Vec<IssueRow>> {
+        let mut builder = QueryBuilder::<Postgres>::new(
+            r#"
+            SELECT id, repo_id, number, is_pull_request, state, title, body, user_id,
+                   comments_count, created_at, updated_at, closed_at, dedupe_hash, raw
+            FROM issues
+            "#,
+        );
+
+        let mut has_where = false;
+
+        if let Some(repo) = &query.repo_full_name {
+            builder.push(" WHERE repo_id = (SELECT id FROM repositories WHERE full_name = ");
+            builder.push_bind(repo);
+            builder.push(") ");
+            has_where = true;
+        }
+
+        if let Some(since) = query.since {
+            builder.push(if has_where { " AND" } else { " WHERE" });
+            builder.push(" updated_at >= ");
+            builder.push_bind(since);
+            builder.push(" ");
+            has_where = true;
+        }
+
+        if let Some(filter) = query.spam {
+            match filter {
+                crate::models::SpamFilter::Likely => {
+                    builder.push(if has_where { " AND" } else { " WHERE" });
+                    builder.push(
+                        " EXISTS (SELECT 1 FROM spam_flags WHERE subject_type = 'issue' AND subject_id = issues.id AND score >= 2.5)",
+                    );
+                }
+                crate::models::SpamFilter::Suspicious => {
+                    builder.push(if has_where { " AND" } else { " WHERE" });
+                    builder.push(
+                        " EXISTS (SELECT 1 FROM spam_flags WHERE subject_type = 'issue' AND subject_id = issues.id AND score >= 1.0)",
+                    );
+                }
+                crate::models::SpamFilter::All => {}
+            }
+        }
+
+        builder.push(" ORDER BY updated_at DESC ");
+
+        if let Some(limit) = query.limit {
+            builder.push(" LIMIT ");
+            builder.push_bind(limit);
+        }
+
+        let query = builder.build_query_as::<IssueRow>();
+        query.fetch_all(&self.pool).await.map_err(DbError::Query)
+    }
+
+    async fn list_by_repo(
+        &self,
+        repo_id: i64,
+        since: Option<DateTime<Utc>>,
+    ) -> Result<Vec<IssueRow>> {
+        if let Some(since) = since {
+            sqlx::query_as::<_, IssueRow>(
+                r#"
+                SELECT id, repo_id, number, is_pull_request, state, title, body,
+                       user_id, comments_count, created_at, updated_at, closed_at,
+                       dedupe_hash, raw
+                FROM issues
+                WHERE repo_id = $1 AND updated_at >= $2
+                ORDER BY updated_at DESC
+                "#,
+            )
+            .bind(repo_id)
+            .bind(since)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(DbError::Query)
+        } else {
+            sqlx::query_as::<_, IssueRow>(
+                r#"
+                SELECT id, repo_id, number, is_pull_request, state, title, body,
+                       user_id, comments_count, created_at, updated_at, closed_at,
+                       dedupe_hash, raw
+                FROM issues
+                WHERE repo_id = $1
+                ORDER BY updated_at DESC
+                "#,
+            )
+            .bind(repo_id)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(DbError::Query)
+        }
+    }
+}
+
+#[derive(Clone)]
+struct PgCommentRepository {
+    pool: PgPool,
+}
+
+#[async_trait]
+impl CommentRepository for PgCommentRepository {
+    async fn upsert(&self, comment: CommentRow) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO comments (
+                id, issue_id, user_id, body, created_at, updated_at, dedupe_hash, raw
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (id) DO UPDATE
+                SET issue_id = EXCLUDED.issue_id,
+                    user_id = EXCLUDED.user_id,
+                    body = EXCLUDED.body,
+                    created_at = EXCLUDED.created_at,
+                    updated_at = EXCLUDED.updated_at,
+                    dedupe_hash = EXCLUDED.dedupe_hash,
+                    raw = EXCLUDED.raw
+            "#,
+        )
+        .bind(comment.id)
+        .bind(comment.issue_id)
+        .bind(comment.user_id)
+        .bind(comment.body)
+        .bind(comment.created_at)
+        .bind(comment.updated_at)
+        .bind(comment.dedupe_hash)
+        .bind(comment.raw)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(DbError::Query)
+    }
+
+    async fn list_by_issue(&self, issue_id: i64) -> Result<Vec<CommentRow>> {
+        sqlx::query_as::<_, CommentRow>(
+            r#"
+            SELECT id, issue_id, user_id, body, created_at, updated_at, dedupe_hash, raw
+            FROM comments
+            WHERE issue_id = $1
+            ORDER BY created_at
+            "#,
+        )
+        .bind(issue_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(DbError::Query)
+    }
+}
+
+#[derive(Clone)]
+struct PgWatermarkRepository {
+    pool: PgPool,
+}
+
+#[async_trait]
+impl WatermarkRepository for PgWatermarkRepository {
+    async fn get(&self, repo_full_name: &str) -> Result<Option<CollectorWatermarkRow>> {
+        sqlx::query_as::<_, CollectorWatermarkRow>(
+            r#"
+            SELECT repo_full_name, last_updated
+            FROM collector_watermarks
+            WHERE repo_full_name = $1
+            "#,
+        )
+        .bind(repo_full_name)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(DbError::Query)
+    }
+
+    async fn set(&self, watermark: WatermarkUpdate) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO collector_watermarks (repo_full_name, last_updated)
+            VALUES ($1, $2)
+            ON CONFLICT (repo_full_name) DO UPDATE
+                SET last_updated = EXCLUDED.last_updated
+            "#,
+        )
+        .bind(watermark.repo_full_name)
+        .bind(watermark.last_updated)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(DbError::Query)
+    }
+}
+
+#[derive(Clone)]
+struct PgSpamFlagsRepository {
+    pool: PgPool,
+}
+
+#[async_trait]
+impl SpamFlagsRepository for PgSpamFlagsRepository {
+    async fn upsert(&self, flag: SpamFlagUpsert) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO spam_flags (subject_type, subject_id, score, reasons, version)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (subject_type, subject_id, version) DO UPDATE
+                SET score = EXCLUDED.score,
+                    reasons = EXCLUDED.reasons
+            "#,
+        )
+        .bind(flag.subject_type)
+        .bind(flag.subject_id)
+        .bind(flag.score)
+        .bind(flag.reasons)
+        .bind(flag.version)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(DbError::Query)
+    }
+
+    async fn list_for_subject(
+        &self,
+        subject_type: &str,
+        subject_id: i64,
+    ) -> Result<Vec<SpamFlagRow>> {
+        sqlx::query_as::<_, SpamFlagRow>(
+            r#"
+            SELECT id, subject_type, subject_id, score, reasons, version, created_at
+            FROM spam_flags
+            WHERE subject_type = $1 AND subject_id = $2
+            ORDER BY created_at DESC
+            "#,
+        )
+        .bind(subject_type)
+        .bind(subject_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(DbError::Query)
+    }
+}

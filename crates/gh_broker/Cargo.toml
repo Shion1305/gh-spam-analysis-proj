@@ -1,0 +1,26 @@
+[package]
+name = "gh_broker"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+common = { path = "../common" }
+futures.workspace = true
+http.workspace = true
+once_cell.workspace = true
+prometheus.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+smallvec.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tracing.workspace = true
+fastrand.workspace = true
+lru.workspace = true

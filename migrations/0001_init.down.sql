@@ -1,0 +1,17 @@
+DROP TABLE IF EXISTS collector_watermarks;
+DROP INDEX IF EXISTS idx_spam_flags_subject;
+DROP INDEX IF EXISTS idx_spam_flags_subject_version;
+DROP TABLE IF EXISTS spam_flags;
+DROP INDEX IF EXISTS idx_comments_body_gin;
+DROP INDEX IF EXISTS idx_comments_dedupe_hash;
+DROP INDEX IF EXISTS idx_comments_issue_id;
+DROP TABLE IF EXISTS comments;
+DROP INDEX IF EXISTS idx_issues_body_gin;
+DROP INDEX IF EXISTS idx_issues_updated_at;
+DROP INDEX IF EXISTS idx_issues_dedupe_hash;
+DROP INDEX IF EXISTS idx_issues_repo_id;
+DROP TABLE IF EXISTS issues;
+DROP INDEX IF EXISTS idx_users_login;
+DROP TABLE IF EXISTS users;
+DROP INDEX IF EXISTS idx_repositories_full_name;
+DROP TABLE IF EXISTS repositories;
