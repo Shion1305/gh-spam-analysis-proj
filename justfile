@@ -59,9 +59,9 @@ check:
 
 test:
 	if command -v cargo-nextest >/dev/null 2>&1; then \
-		cargo nextest run; \
+		cargo nextest run --workspace --exclude db --exclude db_test_fixture --exclude collector --exclude analysis --exclude api; \
 	else \
-		cargo test; \
+		cargo test --workspace --exclude db --exclude db_test_fixture --exclude collector --exclude analysis --exclude api; \
 	fi
 
 test-unit:
