@@ -58,13 +58,25 @@ check:
 # Tests
 
 test:
-	cargo nextest run
+	if command -v cargo-nextest >/dev/null 2>&1; then \
+		cargo nextest run; \
+	else \
+		cargo test; \
+	fi
 
 test-unit:
-	cargo nextest run --workspace --lib
+	if command -v cargo-nextest >/dev/null 2>&1; then \
+		cargo nextest run --workspace --lib; \
+	else \
+		cargo test --lib --workspace; \
+	fi
 
 test-integration:
-	cargo nextest run --workspace --tests
+	if command -v cargo-nextest >/dev/null 2>&1; then \
+		cargo nextest run --workspace --tests; \
+	else \
+		cargo test --tests --workspace; \
+	fi
 
 # Apps
 
