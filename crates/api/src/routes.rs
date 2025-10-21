@@ -66,13 +66,14 @@ async fn list_issues(
     State(state): State<Arc<ApiState>>,
     Query(query): Query<IssuesQuery>,
 ) -> ApiResult<Json<Vec<IssueDto>>> {
-    let mut issue_query = IssueQuery::default();
-    issue_query.repo_full_name = query.repo;
-    issue_query.limit = query.limit.map(|l| l.clamp(1, 200));
-    issue_query.spam = query.spam.as_deref().map(parse_spam_filter).transpose()?;
-    issue_query.since = match query.since {
-        Some(ref value) => Some(parse_since(value)?),
-        None => None,
+    let issue_query = IssueQuery {
+        repo_full_name: query.repo,
+        limit: query.limit.map(|l| l.clamp(1, 200)),
+        spam: query.spam.as_deref().map(parse_spam_filter).transpose()?,
+        since: match query.since {
+            Some(ref value) => Some(parse_since(value)?),
+            None => None,
+        },
     };
 
     let rows = state.repositories.issues().query(issue_query).await?;
@@ -132,12 +133,13 @@ async fn metrics() -> ApiResult<impl IntoResponse> {
     let encoder = prometheus::TextEncoder::new();
     let metric_families = prometheus::gather();
     let mut buffer = Vec::new();
+    let content_type = encoder.format_type().to_string();
     encoder
         .encode(&metric_families, &mut buffer)
         .map_err(|err| ApiError::Internal(err.to_string()))?;
     Ok((
         axum::http::StatusCode::OK,
-        [(axum::http::header::CONTENT_TYPE, encoder.format_type())],
+        [(axum::http::header::CONTENT_TYPE, content_type)],
         buffer,
     ))
 }
@@ -160,7 +162,7 @@ fn parse_since(value: &str) -> ApiResult<DateTime<Utc>> {
     }
     if let Ok(date) = NaiveDate::parse_from_str(value, "%Y-%m-%d") {
         if let Some(dt) = date.and_hms_opt(0, 0, 0) {
-            return Ok(DateTime::<Utc>::from_utc(dt, Utc));
+            return Ok(dt.and_utc());
         }
     }
     Err(ApiError::bad_request("invalid since parameter"))

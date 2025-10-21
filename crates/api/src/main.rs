@@ -23,10 +23,9 @@ async fn main() -> Result<()> {
     });
     let app: Router = build_router(state);
 
-    let addr = config.api.bind.parse()?;
+    let addr: std::net::SocketAddr = config.api.bind.parse()?;
     info!("api listening on {}", addr);
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .await?;
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    axum::serve(listener, app).await?;
     Ok(())
 }

@@ -118,7 +118,7 @@ pub fn summarise_flags(flags: &[SpamFlagRow]) -> (Option<f32>, Vec<String>) {
     let mut reasons = Vec::new();
     let mut max_score = None;
     for flag in flags {
-        max_score = Some(max_score.map_or(flag.score, |current| current.max(flag.score)));
+        max_score = Some(max_score.map_or(flag.score, |current: f32| current.max(flag.score)));
         for reason in &flag.reasons {
             if !reasons.contains(reason) {
                 reasons.push(reason.clone());
