@@ -33,6 +33,13 @@ pub struct Collector<C: GithubClient + 'static> {
     repos: Arc<dyn Repositories>,
 }
 
+struct ProcessContext<'a> {
+    rule_version: &'a str,
+    user_cache: &'a mut HashSet<String>,
+    session_counts: &'a mut HashMap<String, u32>,
+    dedupe_counts: &'a mut HashMap<String, u32>,
+}
+
 impl<C: GithubClient + 'static> Collector<C> {
     pub fn new(config: CollectorConfig, client: Arc<C>, repos: Arc<dyn Repositories>) -> Self {
         Self {
@@ -175,16 +182,14 @@ impl<C: GithubClient + 'static> Collector<C> {
                 });
 
                 if issue_payload.comments > 0 {
-                    self.process_comments(
-                        &issue_row,
-                        &seed.owner,
-                        &seed.name,
+                    let mut ctx = ProcessContext {
                         rule_version,
-                        &mut user_cache,
+                        user_cache: &mut user_cache,
                         session_counts,
                         dedupe_counts,
-                    )
-                    .await?;
+                    };
+                    self.process_comments(&issue_row, &seed.owner, &seed.name, &mut ctx)
+                        .await?;
                 }
             }
 
@@ -213,10 +218,7 @@ impl<C: GithubClient + 'static> Collector<C> {
         issue: &IssueRow,
         owner: &str,
         name: &str,
-        rule_version: &str,
-        user_cache: &mut HashSet<String>,
-        session_counts: &mut HashMap<String, u32>,
-        dedupe_counts: &mut HashMap<String, u32>,
+        ctx: &mut ProcessContext<'_>,
     ) -> Result<()> {
         let mut page = 1u32;
         loop {
@@ -240,14 +242,14 @@ impl<C: GithubClient + 'static> Collector<C> {
                 let normalized_comment =
                     normalize_comment(&comment_payload, issue.id, comment_value.clone());
                 let (posts_before, user_row) = if let Some(user_ref) = &comment_payload.user {
-                    let posts = record_post(session_counts, &user_ref.login);
-                    self.ensure_user(&user_ref.login, user_cache).await?;
+                    let posts = record_post(ctx.session_counts, &user_ref.login);
+                    self.ensure_user(&user_ref.login, ctx.user_cache).await?;
                     let user_row = self.repos.users().get_by_login(&user_ref.login).await?;
                     (posts, user_row)
                 } else {
                     (0, None)
                 };
-                let dedupe_hits = record_dedupe(dedupe_counts, &normalized_comment.dedupe_hash);
+                let dedupe_hits = record_dedupe(ctx.dedupe_counts, &normalized_comment.dedupe_hash);
 
                 let comment_row = to_comment_row(&normalized_comment);
                 self.repos.comments().upsert(comment_row.clone()).await?;
@@ -264,7 +266,7 @@ impl<C: GithubClient + 'static> Collector<C> {
                             subject_id: comment_row.id,
                             score: outcome.score,
                             reasons: outcome.reasons.clone(),
-                            version: rule_version.to_string(),
+                            version: ctx.rule_version.to_string(),
                         })
                         .await?;
                 }

@@ -13,6 +13,7 @@ common = { path = "../common" }
 db = { path = "../db" }
 futures.workspace = true
 gh_broker = { path = "../gh_broker" }
+http.workspace = true
 normalizer = { path = "../normalizer" }
 analysis = { path = "../analysis" }
 reqwest.workspace = true
