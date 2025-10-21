@@ -245,3 +245,35 @@ where
     }
     Ok(map)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn github_config_parses_csv_tokens() {
+        let data = json!({
+            "token_ids": "tokenA,tokenB",
+            "token_secrets": "secretA,secretB",
+            "user_agent": "ua"
+        });
+        let cfg: GithubConfig = serde_json::from_value(data).expect("config parsed");
+        let tokens = cfg.resolved_tokens().expect("tokens resolved");
+        assert_eq!(tokens.len(), 2);
+        assert_eq!(tokens[0].id, "tokenA");
+        assert_eq!(tokens[1].secret, "secretB");
+    }
+
+    #[test]
+    fn broker_config_parses_weights_and_bounds() {
+        let data = json!({
+            "queue_bounds": "core.critical:10,graphql.normal:5",
+            "weights": "core:4,2,1;graphql:3,2,1"
+        });
+        let cfg: BrokerConfig = serde_json::from_value(data).expect("broker config parsed");
+        assert_eq!(cfg.queue_bounds.get("core.critical"), Some(&10));
+        assert_eq!(cfg.queue_bounds.get("graphql.normal"), Some(&5));
+        assert_eq!(cfg.weights.get("core"), Some(&[4, 2, 1]));
+    }
+}

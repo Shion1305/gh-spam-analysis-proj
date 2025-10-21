@@ -363,3 +363,22 @@ fn record_dedupe(counts: &mut HashMap<String, u32>, hash: &str) -> u32 {
     *entry = current.saturating_add(1);
     current
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn record_post_returns_previous_count() {
+        let mut counts = HashMap::new();
+        assert_eq!(record_post(&mut counts, "alice"), 0);
+        assert_eq!(record_post(&mut counts, "alice"), 1);
+    }
+
+    #[test]
+    fn record_dedupe_returns_previous_count() {
+        let mut counts = HashMap::new();
+        assert_eq!(record_dedupe(&mut counts, "hash"), 0);
+        assert_eq!(record_dedupe(&mut counts, "hash"), 1);
+    }
+}
