@@ -14,6 +14,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
   adminer:
     image: adminer:4
     restart: always
@@ -22,5 +23,31 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: gh-spam-lab:latest
+    env_file: .env
+    environment:
+      DATABASE__URL: postgres://postgres:postgres@postgres:5432/github_spam
+      API__BIND: 0.0.0.0:3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  collector:
+    image: gh-spam-lab:latest
+    env_file: .env
+    environment:
+      DATABASE__URL: postgres://postgres:postgres@postgres:5432/github_spam
+    command: ["/usr/local/bin/collector"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   postgres_data:

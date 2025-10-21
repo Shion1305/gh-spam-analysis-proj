@@ -62,7 +62,8 @@ github-spam-lab/
      echo 'TEST_ADMIN_URL=postgres://postgres:postgres@localhost:5432/postgres'
    } > .env
    just aqua-install            # installs just, sqlx-cli, nextest, redis-cli, kcat, promtool
-   just up                      # docker compose up -d (Postgres + Adminer)
+   cp docker/.env.example docker/.env   # populate with real GitHub tokens & overrides
+   just up                      # docker compose up -d (Postgres + Adminer + API + Collector)
 
    # Postgres is seeded automatically (POSTGRES_DB), and the Rust apps run migrations on start-up.
    # No manual `just migrate` is required for local development.
@@ -78,6 +79,16 @@ github-spam-lab/
    just dev-collector           # collector connects to Postgres, runs migrations, and starts ingesting
    just dev-api                 # API auto-runs migrations before serving (default bind: 0.0.0.0:3000)
    just obs-up                  # (optional) spin up Prometheus + Grafana stack
+
+   # Dockerfile + docker-compose
+   # ---------------------------
+   # `docker/docker-compose.yml` now builds the workspace image (see root Dockerfile) and starts:
+   #   - Postgres 17 (with health checks)
+   #   - Adminer (http://localhost:8081)
+   #   - API service (http://localhost:3000)
+   #   - Collector service
+   # The collector requires GitHub REST tokens (`GITHUB__TOKEN_IDS` / `GITHUB__TOKEN_SECRETS`).
+   # Edit docker/.env before running `just up` or `docker compose up` directly.
    ```
 
 4. **Testing & linting**
