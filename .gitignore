@@ -11,3 +11,5 @@ Cargo.lock
 
 # sqlx offline data (commit when generated intentionally)
 .sqlx/*.json
+.env*
+!.env.example

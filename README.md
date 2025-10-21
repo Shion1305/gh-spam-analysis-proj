@@ -56,25 +56,34 @@ github-spam-lab/
    ```bash
    git clone https://github.com/<you>/github-spam-lab.git
    cd github-spam-lab
-   cp .env.example .env
+   # Create .env file with database URL
+   echo 'DATABASE_URL=postgresql://postgres:postgres@localhost:5432/github_spam' > .env
+   echo 'TEST_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres' >> .env
    just aqua-install            # installs just, sqlx-cli, nextest, redis-cli, kcat, promtool
    just up                      # docker compose up -d (Postgres + Adminer)
    just db-create               # create github_spam DB if missing
    just migrate                 # run sqlx migrations
    ```
 
+   Configuration is loaded from `config/default.toml` or `config/local.toml` files, or via environment variables with `__` separator (e.g., `DATABASE__URL`, `API__BIND`).
+
 3. **Run components**
    ```bash
+   # Configure GitHub tokens in config/local.toml or via environment:
+   # export GITHUB__TOKEN_IDS="token1"
+   # export GITHUB__TOKEN_SECRETS="ghp_xxxxx"
    just dev-collector           # run collector against configured GitHub tokens
-   just dev-api                 # start Axum API server on HTTP_BIND
+   just dev-api                 # start Axum API server (default: 0.0.0.0:3000)
    just obs-up                  # (optional) spin up Prometheus + Grafana stack
    ```
 
 4. **Testing & linting**
    ```bash
-   just fmt
-   just lint                    # cargo fmt --check + cargo clippy -D warnings
-   just test                    # cargo nextest run (unit + integration)
+   just format                  # cargo fmt
+   just check                   # cargo fmt --check + cargo clippy -D warnings
+   just test                    # cargo nextest run (unit tests, excludes db-dependent crates)
+   just test-unit               # cargo nextest run --lib
+   just test-integration        # cargo nextest run --tests
    ```
 
 ---
@@ -146,10 +155,13 @@ github-spam-lab/
 
 ## Roadmap
 
-- [ ] Expand unit coverage for broker scheduling, collector loops, and API handlers (nextest harness ready).
+- [x] Generate and commit `.sqlx/` offline metadata for prepared statements.
+- [x] All clippy warnings fixed (compiles with `-D warnings`).
+- [x] Configuration system implemented (TOML + environment variables).
+- [x] Core infrastructure complete (broker, collector, normalizer, analysis, API).
+- [ ] Expand unit coverage for broker scheduling, collector loops, and API handlers.
 - [ ] Add integration suites leveraging `db_test_fixture` and wiremock for HTTP scenarios.
 - [ ] Provide distributed-mode prototypes (Redis/Kafka) wired into the broker queue interfaces.
-- [ ] Generate and commit `.sqlx/` offline metadata for prepared statements.
 - [ ] Harden rule engine (tunable thresholds, richer heuristics, ML hooks).
 
 Progress will be tracked through milestones; contributions welcome (see below).
