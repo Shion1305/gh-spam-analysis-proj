@@ -18,17 +18,28 @@ impl DbFixture {
     }
 
     pub async fn create(&self, prefix: &str) -> Result<DatabaseHandle> {
+        let handle = self.create_unmigrated(prefix).await?;
+        run_migrations(handle.pool()).await?;
+        Ok(handle)
+    }
+
+    pub async fn create_unmigrated(&self, prefix: &str) -> Result<DatabaseHandle> {
         let db_name = format!("{}_{}", prefix, Uuid::new_v4().simple());
         let admin_pool = PgPool::connect(&self.admin_url).await?;
         let create_sql = format!("CREATE DATABASE \"{}\"", db_name);
         admin_pool.execute(create_sql.as_str()).await?;
-        let db_url = format!("{}/{}", self.admin_url, db_name);
-        let pool = PgPool::connect(&db_url).await?;
-        run_migrations(&pool).await?;
+
+        let mut base_url = self.admin_url.clone();
+        if let Some(idx) = base_url.rfind('/') {
+            base_url.truncate(idx);
+        }
+        let database_url = format!("{}/{}", base_url, db_name);
+        let pool = PgPool::connect(&database_url).await?;
         Ok(DatabaseHandle {
             pool,
             name: db_name,
             admin_url: self.admin_url.clone(),
+            database_url,
         })
     }
 }
@@ -37,6 +48,7 @@ pub struct DatabaseHandle {
     pool: PgPool,
     name: String,
     admin_url: String,
+    database_url: String,
 }
 
 impl DatabaseHandle {
@@ -46,6 +58,10 @@ impl DatabaseHandle {
 
     pub fn into_pool(self) -> PgPool {
         self.pool
+    }
+
+    pub fn database_url(&self) -> &str {
+        &self.database_url
     }
 
     pub async fn cleanup(self) -> Result<()> {

@@ -17,3 +17,8 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+db_test_fixture = { path = "../db_test_fixture" }
+serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }
