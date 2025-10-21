@@ -9,8 +9,34 @@ on:
 jobs:
   build-test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/github_spam
+      TEST_ADMIN_URL: postgres://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v4
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Prepare databases
+        run: |
+          until pg_isready -h localhost -U postgres -d postgres; do
+            echo "Waiting for database..."
+            sleep 2
+          done
+          psql "$TEST_ADMIN_URL" -c 'CREATE DATABASE github_spam;' || true
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
