@@ -56,13 +56,16 @@ github-spam-lab/
    ```bash
    git clone https://github.com/<you>/github-spam-lab.git
    cd github-spam-lab
-   # Create .env file with database URL
-   echo 'DATABASE_URL=postgresql://postgres:postgres@localhost:5432/github_spam' > .env
-   echo 'TEST_ADMIN_URL=postgresql://postgres:postgres@localhost:5432/postgres' >> .env
+   # Create .env file with database URLs (used by the binaries & tests)
+   {
+     echo 'DATABASE_URL=postgres://postgres:postgres@localhost:5432/github_spam'
+     echo 'TEST_ADMIN_URL=postgres://postgres:postgres@localhost:5432/postgres'
+   } > .env
    just aqua-install            # installs just, sqlx-cli, nextest, redis-cli, kcat, promtool
    just up                      # docker compose up -d (Postgres + Adminer)
-   just db-create               # create github_spam DB if missing
-   just migrate                 # run sqlx migrations
+
+   # Postgres is seeded automatically (POSTGRES_DB), and the Rust apps run migrations on start-up.
+   # No manual `just migrate` is required for local development.
    ```
 
    Configuration is loaded from `config/default.toml` or `config/local.toml` files, or via environment variables with `__` separator (e.g., `DATABASE__URL`, `API__BIND`).
@@ -72,16 +75,16 @@ github-spam-lab/
    # Configure GitHub tokens in config/local.toml or via environment:
    # export GITHUB__TOKEN_IDS="token1"
    # export GITHUB__TOKEN_SECRETS="ghp_xxxxx"
-   just dev-collector           # run collector against configured GitHub tokens
-   just dev-api                 # start Axum API server (default: 0.0.0.0:3000)
+   just dev-collector           # collector connects to Postgres, runs migrations, and starts ingesting
+   just dev-api                 # API auto-runs migrations before serving (default bind: 0.0.0.0:3000)
    just obs-up                  # (optional) spin up Prometheus + Grafana stack
    ```
 
 4. **Testing & linting**
    ```bash
    just format                  # cargo fmt
-   just check                   # cargo fmt --check + cargo clippy -D warnings
-   just test                    # cargo nextest run (unit tests, excludes db-dependent crates)
+   just check                   # cargo fmt --check + cargo clippy -D warnings (uses SQLX_OFFLINE)
+   just test                    # cargo nextest run (requires Postgres running via `just up`)
    just test-unit               # cargo nextest run --lib
    just test-integration        # cargo nextest run --tests
    ```
@@ -116,13 +119,18 @@ github-spam-lab/
 
 ---
 
-## Database Schema Highlights
+## Database & Schema Management
 
 - `repositories`, `users`, `issues`, `comments` tables mirror GitHub IDs and store raw JSONB blobs for reproducibility.
 - `spam_flags` keeps versioned scores/reasons for issues/comments.
 - `collector_watermarks` records per-repo `last_updated` for incremental fetches.
 - Indexes: `dedupe_hash` on issues/comments, GIN full-text on bodies, queue-friendly indexes on `updated_at`, `repo_id`, etc.
-- All migrations live in `migrations/` and are executed via `sqlx::migrate!()` (integration tests run against temp DBs created by `db_test_fixture` crate).
+- All migrations live in `migrations/` and are executed by the binaries on startup via `sqlx::migrate!()`; no manual intervention is required. Integration tests use `db_test_fixture` to provision isolated databases and apply migrations automatically.
+
+### Local Workflow Tips
+
+- Stop/start Postgres quickly with `just down` / `just up`. Compose seeds a fresh `github_spam` database whenever the container is recreated.
+- For CI/Lint pipelines we run in SQLx offline mode (`SQLX_OFFLINE=true`); regenerate `.sqlx/` metadata with `cargo sqlx prepare --workspace -- --all-targets` whenever queries change.
 
 ---
 
@@ -150,6 +158,12 @@ github-spam-lab/
   - P95 latency
   - Cache hit ratio
 - Logs: `tracing` with env-driven filters (`RUST_LOG`), structured JSON logging optional.
+
+## Continuous Integration & Release
+
+- `.github/workflows/ci.yml` runs fmt, clippy (`-D warnings`), and `cargo nextest` against a Postgres service launched via Docker Compose. The workflow relies on the application's built-in migrations, so schema drift is caught automatically.
+- `.github/workflows/helm-publish.yml` packages `charts/github-spam-lab` and publishes chart artifacts to `gh-pages` upon a `chart-v*` tag. Artifacts are uploaded using `actions/upload-artifact@v4` and an index is generated for Helm repositories.
+- Set `DATABASE_URL`/`TEST_ADMIN_URL` secrets in self-hosted runners if you customize database credentials.
 
 ---
 
