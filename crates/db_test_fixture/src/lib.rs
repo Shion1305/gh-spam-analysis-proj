@@ -18,7 +18,7 @@ impl DbFixture {
     }
 
     pub async fn create(&self, prefix: &str) -> Result<DatabaseHandle> {
-        let db_name = format!("{}_{}", prefix, Uuid::new_v4().to_simple());
+        let db_name = format!("{}_{}", prefix, Uuid::new_v4().simple());
         let admin_pool = PgPool::connect(&self.admin_url).await?;
         let create_sql = format!("CREATE DATABASE \"{}\"", db_name);
         admin_pool.execute(create_sql.as_str()).await?;
