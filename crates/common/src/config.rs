@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use config::{Config, ConfigError, Environment, File};
 use serde::Deserialize;
-use serde_with::{serde_as, CommaSeparator, StringWithSeparator};
+use serde_with::{formats::CommaSeparator, serde_as, StringWithSeparator};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AppConfig {
@@ -67,10 +67,10 @@ pub struct GithubToken {
 pub struct GithubConfig {
     #[serde(default)]
     pub tokens: Vec<GithubToken>,
-    #[serde_as(as = "StringWithSeparator::<CommaSeparator, Vec<String>>")]
+    #[serde_as(as = "StringWithSeparator::<CommaSeparator, String>")]
     #[serde(default)]
     pub token_ids: Vec<String>,
-    #[serde_as(as = "StringWithSeparator::<CommaSeparator, Vec<String>>")]
+    #[serde_as(as = "StringWithSeparator::<CommaSeparator, String>")]
     #[serde(default)]
     pub token_secrets: Vec<String>,
     pub user_agent: String,
