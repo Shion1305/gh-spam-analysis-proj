@@ -25,6 +25,12 @@ pub struct ReqwestExecutor {
     client: reqwest::Client,
 }
 
+impl Default for ReqwestExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ReqwestExecutor {
     pub fn new() -> Self {
         let client = reqwest::Client::builder()
@@ -64,6 +70,24 @@ struct WorkItem {
     key: String,
     cached: Option<CachedResponse>,
 }
+
+type QueueSenders = HashMap<(Budget, crate::model::Priority), mpsc::Sender<WorkItem>>;
+type QueueReceivers = Vec<(
+    Budget,
+    (
+        mpsc::Receiver<WorkItem>,
+        mpsc::Receiver<WorkItem>,
+        mpsc::Receiver<WorkItem>,
+    ),
+)>;
+type ReceiversMap = HashMap<
+    Budget,
+    (
+        Option<mpsc::Receiver<WorkItem>>,
+        Option<mpsc::Receiver<WorkItem>>,
+        Option<mpsc::Receiver<WorkItem>>,
+    ),
+>;
 
 #[derive(Clone)]
 pub struct GithubBrokerBuilder {
@@ -189,26 +213,9 @@ impl GithubBrokerBuilder {
 
     fn build_queues(
         bounds: &HashMap<(Budget, crate::model::Priority), usize>,
-    ) -> (
-        HashMap<(Budget, crate::model::Priority), mpsc::Sender<WorkItem>>,
-        Vec<(
-            Budget,
-            (
-                mpsc::Receiver<WorkItem>,
-                mpsc::Receiver<WorkItem>,
-                mpsc::Receiver<WorkItem>,
-            ),
-        )>,
-    ) {
+    ) -> (QueueSenders, QueueReceivers) {
         let mut senders = HashMap::new();
-        let mut receivers_map: HashMap<
-            Budget,
-            (
-                Option<mpsc::Receiver<WorkItem>>,
-                Option<mpsc::Receiver<WorkItem>>,
-                Option<mpsc::Receiver<WorkItem>>,
-            ),
-        > = HashMap::new();
+        let mut receivers_map: ReceiversMap = HashMap::new();
 
         for budget in [Budget::Core, Budget::Search, Budget::Graphql] {
             for priority in crate::model::Priority::ALL {
@@ -543,7 +550,7 @@ async fn execute_once(
             TokenSelection::Wait(wait) => {
                 metrics::SLEEP_SECONDS
                     .with_label_values(&[budget_label(budget), "rate_limit"])
-                    .inc_by(wait.as_secs() as u64);
+                    .inc_by(wait.as_secs());
                 sleep(wait + Duration::from_secs(1)).await;
             }
         }
@@ -637,7 +644,7 @@ async fn execute_once(
             if let Some(RetryAdvice { wait, reason }) = parse_retry_after(resp.headers()) {
                 metrics::SLEEP_SECONDS
                     .with_label_values(&[budget_label(budget), reason])
-                    .inc_by(wait.as_secs() as u64);
+                    .inc_by(wait.as_secs());
                 sleep(wait + Duration::from_secs(1)).await;
                 return Err(anyhow::anyhow!("retry after"));
             }

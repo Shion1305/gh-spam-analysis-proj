@@ -19,6 +19,12 @@ pub struct RateLimitState {
     pub reset_at: DateTime<Utc>,
 }
 
+impl Default for RateLimitState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RateLimitState {
     pub fn new() -> Self {
         let now = Utc::now();
@@ -56,9 +62,7 @@ impl TokenState {
     }
 
     pub fn state_for(&mut self, budget: Budget) -> &mut RateLimitState {
-        self.budgets
-            .entry(budget)
-            .or_insert_with(RateLimitState::new)
+        self.budgets.entry(budget).or_default()
     }
 }
 
