@@ -25,7 +25,7 @@ chrono = { version = "0.4.31", features = ["serde"] }
 config = "0.14.0"
 dotenvy = "0.15.7"
 futures = "0.3.30"
-http = "1.0.0"
+http = "0.2"
 httpdate = "1.0.3"
 hyper = { version = "1.2.0", features = ["http1", "http2", "client"] }
 lru = "0.11.1"
