@@ -12,19 +12,17 @@ jobs:
     env:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/github_spam
       TEST_ADMIN_URL: postgres://postgres:postgres@localhost:5432/postgres
+      SQLX_OFFLINE: "true"
     steps:
       - uses: actions/checkout@v4
       - name: Start PostgreSQL
         run: docker compose -f docker/docker-compose.yml up -d postgres
       - name: Wait for database
         run: |
-          until docker compose -f docker/docker-compose.yml exec postgres pg_isready -U postgres; do
+          until docker compose -f docker/docker-compose.yml exec postgres pg_isready -U postgres >/dev/null 2>&1; do
             echo "Waiting for postgres..."
             sleep 2
           done
-      - name: Prepare databases
-        run: |
-          docker compose -f docker/docker-compose.yml exec postgres psql -U postgres -c 'CREATE DATABASE github_spam;' || true
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
@@ -46,10 +44,6 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
-      - name: Install sqlx-cli
-        run: cargo install sqlx-cli --locked --no-default-features --features rustls --force
-      - name: Run migrations
-        run: cargo sqlx migrate run
       - name: Run fmt
         run: cargo fmt -- --check
       - name: Run clippy

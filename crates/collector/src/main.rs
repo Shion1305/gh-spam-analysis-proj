@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Result};
 use collector::{BrokerGithubClient, Collector};
 use common::{config::AppConfig, logging};
-use db::pg::{run_migrations, PgDatabase};
+use db::pg::PgDatabase;
 use db::Repositories;
 use gh_broker::{Budget, GithubBrokerBuilder, GithubToken as BrokerToken, Priority};
 use tracing::info;
@@ -54,7 +54,6 @@ async fn main() -> Result<()> {
     ));
 
     let database = Arc::new(PgDatabase::connect(&config.database.url).await?);
-    run_migrations(database.pool()).await?;
     let repositories: Arc<dyn Repositories> = database.clone() as Arc<dyn Repositories>;
 
     let collector = Collector::new(config.collector.clone(), client, repositories);

@@ -3,7 +3,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::{postgres::PgPoolOptions, PgPool, Postgres, QueryBuilder};
-use tracing::instrument;
+use tokio::time::{sleep, Duration};
+use tracing::{instrument, warn};
 
 use crate::errors::{DbError, Result};
 use crate::models::{
@@ -35,13 +36,38 @@ pub struct PgDatabase {
 
 impl PgDatabase {
     pub async fn connect(database_url: &str) -> Result<Self> {
-        let pool = PgPoolOptions::new()
-            .max_connections(10)
-            .connect(database_url)
-            .await
-            .map_err(DbError::Query)?;
+        const MAX_ATTEMPTS: u32 = 5;
+        const BASE_DELAY_MS: u64 = 500;
 
-        Ok(Self::from_pool(pool))
+        let mut attempts = 0;
+        loop {
+            match PgPoolOptions::new()
+                .max_connections(10)
+                .connect(database_url)
+                .await
+            {
+                Ok(pool) => {
+                    run_migrations(&pool).await?;
+                    return Ok(Self::from_pool(pool));
+                }
+                Err(err) => {
+                    attempts += 1;
+                    if attempts >= MAX_ATTEMPTS {
+                        return Err(DbError::Query(err));
+                    }
+
+                    let exp = (attempts - 1).min(5);
+                    let backoff = Duration::from_millis(BASE_DELAY_MS * (1u64 << exp));
+                    warn!(
+                        attempts,
+                        error = %err,
+                        wait_ms = backoff.as_millis(),
+                        "database connection failed; retrying"
+                    );
+                    sleep(backoff).await;
+                }
+            }
+        }
     }
 
     pub fn from_pool(pool: PgPool) -> Self {

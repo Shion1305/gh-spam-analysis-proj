@@ -4,7 +4,7 @@ use anyhow::Result;
 use api::{build_router, ApiState};
 use axum::Router;
 use common::{config::AppConfig, logging};
-use db::pg::{run_migrations, PgDatabase};
+use db::pg::PgDatabase;
 use db::Repositories;
 use tracing::info;
 
@@ -13,7 +13,6 @@ async fn main() -> Result<()> {
     logging::init_logging("info");
     let config = AppConfig::load()?;
     let database = Arc::new(PgDatabase::connect(&config.database.url).await?);
-    run_migrations(database.pool()).await?;
     let repositories: Arc<dyn Repositories> = database.clone();
     let metrics_path: &'static str =
         Box::leak(config.observability.metrics_path.clone().into_boxed_str());
