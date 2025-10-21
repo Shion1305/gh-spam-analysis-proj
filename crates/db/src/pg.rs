@@ -555,7 +555,7 @@ impl SpamFlagsRepository for PgSpamFlagsRepository {
                 summaries.push(ActorSpamSummary {
                     login,
                     avg_score: row.avg_score.unwrap_or_default() as f32,
-                    total_score: row.total_score.unwrap_or_default() as f32,
+                    total_score: row.total_score.unwrap_or_default(),
                     flag_count: row.flag_count.unwrap_or_default(),
                     reasons: row.reasons.unwrap_or_default(),
                 });
