@@ -1,7 +1,10 @@
 use std::path::Path;
 
+use std::collections::HashMap;
+
 use config::{Config, ConfigError, Environment, File};
 use serde::Deserialize;
+use serde_with::{serde_as, CommaSeparator, StringWithSeparator};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AppConfig {
@@ -59,10 +62,38 @@ pub struct GithubToken {
     pub secret: String,
 }
 
+#[serde_as]
 #[derive(Debug, Clone, Deserialize)]
 pub struct GithubConfig {
+    #[serde(default)]
     pub tokens: Vec<GithubToken>,
+    #[serde_as(as = "StringWithSeparator::<CommaSeparator, Vec<String>>")]
+    #[serde(default)]
+    pub token_ids: Vec<String>,
+    #[serde_as(as = "StringWithSeparator::<CommaSeparator, Vec<String>>")]
+    #[serde(default)]
+    pub token_secrets: Vec<String>,
     pub user_agent: String,
+}
+
+impl GithubConfig {
+    pub fn resolved_tokens(&self) -> Result<Vec<GithubToken>, ConfigError> {
+        if !self.tokens.is_empty() {
+            return Ok(self.tokens.clone());
+        }
+        if self.token_ids.len() != self.token_secrets.len() {
+            return Err(ConfigError::Message(
+                "GITHUB_TOKENS and GITHUB_TOKEN_SECRETS length mismatch".into(),
+            ));
+        }
+        Ok(self
+            .token_ids
+            .iter()
+            .cloned()
+            .zip(self.token_secrets.iter().cloned())
+            .map(|(id, secret)| GithubToken { id, secret })
+            .collect())
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -73,6 +104,8 @@ pub struct CollectorConfig {
     pub page_size: u32,
     #[serde(default)]
     pub run_once: bool,
+    #[serde(default = "CollectorConfig::default_seed_path")]
+    pub seed_repos_path: String,
 }
 
 impl CollectorConfig {
@@ -82,6 +115,10 @@ impl CollectorConfig {
 
     const fn default_page_size() -> u32 {
         100
+    }
+
+    fn default_seed_path() -> String {
+        "scripts/seed_repos.json".to_string()
     }
 }
 
@@ -93,6 +130,20 @@ pub struct BrokerConfig {
     pub per_repo_inflight: usize,
     #[serde(default)]
     pub distributed: bool,
+    #[serde(default = "BrokerConfig::default_cache_capacity")]
+    pub cache_capacity: usize,
+    #[serde(default = "BrokerConfig::default_cache_ttl_secs")]
+    pub cache_ttl_secs: u64,
+    #[serde(default = "BrokerConfig::default_backoff_base_ms")]
+    pub backoff_base_ms: u64,
+    #[serde(default = "BrokerConfig::default_backoff_max_ms")]
+    pub backoff_max_ms: u64,
+    #[serde(default = "BrokerConfig::default_jitter_frac")]
+    pub jitter_frac: f32,
+    #[serde(default, deserialize_with = "parse_weights")]
+    pub weights: HashMap<String, [u32; 3]>,
+    #[serde(default, deserialize_with = "parse_queue_bounds")]
+    pub queue_bounds: HashMap<String, usize>,
 }
 
 impl BrokerConfig {
@@ -102,6 +153,26 @@ impl BrokerConfig {
 
     const fn default_per_repo_inflight() -> usize {
         2
+    }
+
+    const fn default_cache_capacity() -> usize {
+        5000
+    }
+
+    const fn default_cache_ttl_secs() -> u64 {
+        600
+    }
+
+    const fn default_backoff_base_ms() -> u64 {
+        500
+    }
+
+    const fn default_backoff_max_ms() -> u64 {
+        60_000
+    }
+
+    const fn default_jitter_frac() -> f32 {
+        0.2
     }
 }
 
@@ -120,4 +191,57 @@ impl ObservabilityConfig {
     fn default_metrics_path() -> String {
         "/metrics".to_string()
     }
+}
+
+fn parse_weights<'de, D>(deserializer: D) -> Result<HashMap<String, [u32; 3]>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = Option::<String>::deserialize(deserializer)?;
+    let mut map = HashMap::new();
+    if let Some(raw) = raw {
+        for entry in raw.split(';').filter(|s| !s.trim().is_empty()) {
+            let mut parts = entry.splitn(2, ':');
+            let budget = parts
+                .next()
+                .ok_or_else(|| serde::de::Error::custom("missing budget in BROKER_WEIGHTS"))?
+                .trim()
+                .to_string();
+            let weights_part = parts
+                .next()
+                .ok_or_else(|| serde::de::Error::custom("missing weights in BROKER_WEIGHTS"))?;
+            let weights: Vec<u32> = weights_part
+                .split(',')
+                .filter_map(|w| w.trim().parse::<u32>().ok())
+                .collect();
+            if weights.len() == 3 {
+                map.insert(budget, [weights[0], weights[1], weights[2]]);
+            }
+        }
+    }
+    Ok(map)
+}
+
+fn parse_queue_bounds<'de, D>(deserializer: D) -> Result<HashMap<String, usize>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = Option::<String>::deserialize(deserializer)?;
+    let mut map = HashMap::new();
+    if let Some(raw) = raw {
+        for entry in raw.split(',').filter(|s| !s.trim().is_empty()) {
+            let mut parts = entry.splitn(2, ':');
+            let key = parts
+                .next()
+                .ok_or_else(|| serde::de::Error::custom("missing key in BROKER_QUEUE_BOUNDS"))?
+                .trim()
+                .to_string();
+            let val = parts
+                .next()
+                .and_then(|v| v.trim().parse::<usize>().ok())
+                .ok_or_else(|| serde::de::Error::custom("invalid value in BROKER_QUEUE_BOUNDS"))?;
+            map.insert(key, val);
+        }
+    }
+    Ok(map)
 }

@@ -3,8 +3,8 @@ use chrono::{DateTime, Utc};
 
 use crate::errors::Result;
 use crate::models::{
-    CollectorWatermarkRow, CommentRow, IssueQuery, IssueRow, RepositoryRow, SpamFlagRow,
-    SpamFlagUpsert, UserRow, WatermarkUpdate,
+    ActorSpamSummary, CollectorWatermarkRow, CommentRow, IssueQuery, IssueRow, RepositoryRow,
+    SpamFlagRow, SpamFlagUpsert, UserRow, WatermarkUpdate,
 };
 
 #[async_trait]
@@ -52,6 +52,11 @@ pub trait SpamFlagsRepository: Send + Sync {
         subject_type: &str,
         subject_id: i64,
     ) -> Result<Vec<SpamFlagRow>>;
+    async fn top_spammy_users(
+        &self,
+        since: Option<DateTime<Utc>>,
+        limit: i64,
+    ) -> Result<Vec<ActorSpamSummary>>;
 }
 
 pub trait Repositories: Send + Sync {

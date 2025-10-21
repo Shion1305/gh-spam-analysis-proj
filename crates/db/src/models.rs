@@ -117,8 +117,10 @@ impl TempDb {
 }
 
 #[derive(Debug, Clone)]
-pub struct ActorActivityRow {
+pub struct ActorSpamSummary {
     pub login: String,
-    pub spam_score: f32,
+    pub avg_score: f32,
+    pub total_score: f32,
+    pub flag_count: i64,
     pub reasons: Vec<String>,
 }

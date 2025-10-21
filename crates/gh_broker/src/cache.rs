@@ -26,8 +26,10 @@ pub struct ResponseCache {
 
 impl ResponseCache {
     pub fn new(capacity: usize, ttl: Duration) -> Self {
+        let capacity = std::num::NonZeroUsize::new(capacity.max(1))
+            .unwrap_or_else(|| std::num::NonZeroUsize::new(1).unwrap());
         Self {
-            inner: std::sync::Arc::new(Mutex::new(LruCache::new(capacity.try_into().unwrap()))),
+            inner: std::sync::Arc::new(Mutex::new(LruCache::new(capacity))),
             ttl,
         }
     }

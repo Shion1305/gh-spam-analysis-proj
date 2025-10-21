@@ -1,0 +1,8 @@
+aqua_version: v1.37.1
+packages:
+  - name: casey/just@v1.23.0
+  - name: launchbadge/sqlx-cli@v0.7.3
+  - name: nextest-rs/nextest@v0.1.7
+  - name: redis/redis@7.2.0
+  - name: edenhill/kcat@1.7.1
+  - name: prometheus/prometheus@v2.48.0

@@ -7,8 +7,8 @@ use tracing::instrument;
 
 use crate::errors::{DbError, Result};
 use crate::models::{
-    CollectorWatermarkRow, CommentRow, IssueQuery, IssueRow, RepositoryRow, SpamFlagRow,
-    SpamFlagUpsert, UserRow, WatermarkUpdate,
+    ActorSpamSummary, CollectorWatermarkRow, CommentRow, IssueQuery, IssueRow, RepositoryRow,
+    SpamFlagRow, SpamFlagUpsert, UserRow, WatermarkUpdate,
 };
 use crate::repositories::{
     CommentRepository, IssueRepository, RepoRepository, Repositories, SpamFlagsRepository,
@@ -509,5 +509,58 @@ impl SpamFlagsRepository for PgSpamFlagsRepository {
         .fetch_all(&self.pool)
         .await
         .map_err(DbError::Query)
+    }
+
+    async fn top_spammy_users(
+        &self,
+        since: Option<DateTime<Utc>>,
+        limit: i64,
+    ) -> Result<Vec<ActorSpamSummary>> {
+        let rows = sqlx::query!(
+            r#"
+            SELECT
+                login,
+                AVG(score) AS avg_score,
+                SUM(score) AS total_score,
+                COUNT(*) AS flag_count,
+                ARRAY_AGG(DISTINCT reason) AS reasons
+            FROM (
+                SELECT
+                    COALESCE(u.login, uc.login) AS login,
+                    sf.score,
+                    sf.created_at,
+                    unnest(sf.reasons) AS reason
+                FROM spam_flags sf
+                LEFT JOIN issues i ON sf.subject_type = 'issue' AND sf.subject_id = i.id
+                LEFT JOIN users u ON i.user_id = u.id
+                LEFT JOIN comments c ON sf.subject_type = 'comment' AND sf.subject_id = c.id
+                LEFT JOIN users uc ON c.user_id = uc.id
+                WHERE ($1::timestamptz IS NULL OR sf.created_at >= $1)
+            ) flagged
+            WHERE login IS NOT NULL
+            GROUP BY login
+            ORDER BY total_score DESC
+            LIMIT $2
+            "#,
+            since,
+            limit
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(DbError::Query)?;
+
+        let mut summaries = Vec::new();
+        for row in rows {
+            if let Some(login) = row.login {
+                summaries.push(ActorSpamSummary {
+                    login,
+                    avg_score: row.avg_score.unwrap_or_default() as f32,
+                    total_score: row.total_score.unwrap_or_default() as f32,
+                    flag_count: row.flag_count.unwrap_or_default(),
+                    reasons: row.reasons.unwrap_or_default(),
+                });
+            }
+        }
+        Ok(summaries)
     }
 }

@@ -9,12 +9,12 @@ The project ingests issues/PRs/comments from a seed set of high-profile reposito
 
 | Objective | Current State |
 | --- | --- |
-| Multi-token GitHub broker with priority queues, retries, caching, metrics | **Scaffolded** (`crates/gh_broker`) – core data structures, cache, metrics skeleton in place. |
+| Multi-token GitHub broker with priority queues, retries, caching, metrics | **Implemented** (`crates/gh_broker`) – production-ready builder with configurable weights/bounds, token rotation, caching, Prometheus metrics. |
 | Data model & persistence layer with sqlx migrations | **Implemented** (`migrations/`, `crates/db`). |
-| Normalisation utilities & dedupe hashing | **Drafted** (`crates/normalizer`). |
-| Collector, analysis, API crates | **Stubs** (`crates/collector`, `crates/analysis`, `crates/api`) – wiring and tests still pending. |
-| Test harnesses (unit, integration, wiremock, DB fixtures) | **Planned** (`crates/db_test_fixture` skeleton). |
-| Tooling: Justfile, Aqua, Docker, Observability stack | **To Do** (tracked in roadmap). |
+| Normalisation utilities & dedupe hashing | **Implemented** (`crates/normalizer`). |
+| Collector, analysis, API crates | **Implemented** (`crates/collector`, `crates/analysis`, `crates/api`) – ingestion loop, rule-based scoring primitives, Axum API. |
+| Test harnesses (unit, integration, wiremock, DB fixtures) | **In progress** (`crates/db_test_fixture` ready; additional suites planned). |
+| Tooling: Justfile, Aqua, Docker, Observability stack | **Implemented** (`Justfile`, `aqua.yaml`, `docker/`). |
 
 Non-goals for the MVP:
 - Writing back to GitHub (strictly read-only).
@@ -39,14 +39,12 @@ github-spam-lab/
 │   ├── gh_broker/             # Multi-budget, multi-token broker
 │   └── normalizer/            # Payload models → normalised DB rows
 ├── migrations/                # sqlx migrations (commit .sqlx metadata when generated)
-└── scripts/                   # Seed data, helper scripts (pending)
+└── scripts/                   # Seed data & helpers
 ```
 
 ---
 
 ## Quickstart
-
-> **Note:** Tooling recipes (`just`, `aqua`, docker-compose) are not committed yet. The commands below outline the intended workflow once those artifacts land.
 
 1. **Prerequisites**
    - Rust toolchain (`rustup`), `cargo fmt`, `cargo clippy`
@@ -136,7 +134,7 @@ github-spam-lab/
 ## Observability & Ops
 
 - Prometheus metrics from broker & API (`/metrics`), including queue lengths, rate limits, retry counts, latency histograms.
-- Docker compose stack under `docker/obs/` (pending) will bundle Prometheus + Grafana with a starter dashboard covering:
+- Docker compose stack under `docker/obs/` bundles Prometheus + Grafana with a starter dashboard covering:
   - Per-budget remaining/limit per token
   - Queue lengths by priority
   - Request rate/error/retry counts
@@ -148,13 +146,11 @@ github-spam-lab/
 
 ## Roadmap
 
-- [ ] Finalise Justfile & Aqua configuration with pinned CLI tool versions.
-- [ ] Complete GitHub client adapter + collector loop with tests.
-- [ ] Add API routes, DTOs, and integration tests.
-- [ ] Provide distributed-mode prototypes (Redis token buckets, Kafka work queues).
-- [ ] Commit `.sqlx/` offline metadata and `.config/nextest.toml`.
-- [ ] Fill in Grafana dashboard JSON + docker compose for obs/dist stacks.
-- [ ] Harden rule engine (tunable thresholds, richer reasons, ML hooks).
+- [ ] Expand unit coverage for broker scheduling, collector loops, and API handlers (nextest harness ready).
+- [ ] Add integration suites leveraging `db_test_fixture` and wiremock for HTTP scenarios.
+- [ ] Provide distributed-mode prototypes (Redis/Kafka) wired into the broker queue interfaces.
+- [ ] Generate and commit `.sqlx/` offline metadata for prepared statements.
+- [ ] Harden rule engine (tunable thresholds, richer heuristics, ML hooks).
 
 Progress will be tracked through milestones; contributions welcome (see below).
 
@@ -173,4 +169,3 @@ Progress will be tracked through milestones; contributions welcome (see below).
 ## License
 
 Dual-licensed under Apache 2.0 and MIT (see `LICENSE-{APACHE,MIT}` once added). You may contribute under either license.
-

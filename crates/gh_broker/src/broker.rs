@@ -130,6 +130,19 @@ impl GithubBrokerBuilder {
         self
     }
 
+    pub fn queue_bounds(
+        mut self,
+        bounds: HashMap<(Budget, crate::model::Priority), usize>,
+    ) -> Self {
+        self.queue_bounds = bounds;
+        self
+    }
+
+    pub fn weights(mut self, weights: HashMap<Budget, [u32; 3]>) -> Self {
+        self.weights = weights;
+        self
+    }
+
     pub fn backoff(mut self, base: Duration, max: Duration, jitter: f32) -> Self {
         self.backoff_base = base;
         self.backoff_max = max;

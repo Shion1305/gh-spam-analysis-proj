@@ -1,0 +1,167 @@
+use std::sync::Arc;
+
+use axum::extract::{Path, Query, State};
+use axum::response::IntoResponse;
+use axum::routing::get;
+use axum::{Json, Router};
+use chrono::{DateTime, NaiveDate, Utc};
+use db::models::{IssueQuery, SpamFilter};
+use db::Repositories;
+use prometheus::Encoder;
+use serde::Deserialize;
+use serde_json::json;
+use tracing::instrument;
+
+use crate::dto::{summarise_flags, IssueDto, RepoDto, SpammyUserDto, UserDto};
+use crate::error::{ApiError, ApiResult};
+
+#[derive(Clone)]
+pub struct ApiState {
+    pub repositories: Arc<dyn Repositories>,
+    pub metrics_path: &'static str,
+}
+
+pub fn build_router(state: Arc<ApiState>) -> Router {
+    let metrics_path: &'static str = state.metrics_path;
+    Router::new()
+        .route("/healthz", get(healthz))
+        .route("/repos", get(list_repos))
+        .route("/issues", get(list_issues))
+        .route("/actors/:login", get(get_actor))
+        .route("/top/spammy-users", get(top_spammy_users))
+        .route(metrics_path, get(metrics))
+        .with_state(state)
+}
+
+async fn healthz() -> impl IntoResponse {
+    Json(json!({ "status": "ok" }))
+}
+
+#[derive(Debug, Deserialize)]
+struct RepoQuery {
+    limit: Option<i64>,
+}
+
+#[instrument(skip(state))]
+async fn list_repos(
+    State(state): State<Arc<ApiState>>,
+    Query(query): Query<RepoQuery>,
+) -> ApiResult<Json<Vec<RepoDto>>> {
+    let limit = query.limit.unwrap_or(50).clamp(1, 500);
+    let rows = state.repositories.repos().list(limit).await?;
+    let dto = rows.into_iter().map(RepoDto::from).collect();
+    Ok(Json(dto))
+}
+
+#[derive(Debug, Deserialize)]
+struct IssuesQuery {
+    repo: Option<String>,
+    spam: Option<String>,
+    since: Option<String>,
+    limit: Option<i64>,
+}
+
+#[instrument(skip(state))]
+async fn list_issues(
+    State(state): State<Arc<ApiState>>,
+    Query(query): Query<IssuesQuery>,
+) -> ApiResult<Json<Vec<IssueDto>>> {
+    let mut issue_query = IssueQuery::default();
+    issue_query.repo_full_name = query.repo;
+    issue_query.limit = query.limit.map(|l| l.clamp(1, 200));
+    issue_query.spam = query.spam.as_deref().map(parse_spam_filter).transpose()?;
+    issue_query.since = match query.since {
+        Some(ref value) => Some(parse_since(value)?),
+        None => None,
+    };
+
+    let rows = state.repositories.issues().query(issue_query).await?;
+    let mut issues = Vec::with_capacity(rows.len());
+    for issue in rows {
+        let flags = state
+            .repositories
+            .spam_flags()
+            .list_for_subject("issue", issue.id)
+            .await?;
+        let (score, reasons) = summarise_flags(&flags);
+        issues.push(IssueDto::from_row(issue, score, reasons));
+    }
+    Ok(Json(issues))
+}
+
+#[instrument(skip(state))]
+async fn get_actor(
+    State(state): State<Arc<ApiState>>,
+    Path(login): Path<String>,
+) -> ApiResult<Json<UserDto>> {
+    let user = state
+        .repositories
+        .users()
+        .get_by_login(&login)
+        .await?
+        .ok_or_else(|| ApiError::not_found(format!("user {} not found", login)))?;
+    Ok(Json(UserDto::from(user)))
+}
+
+#[derive(Debug, Deserialize)]
+struct SpammyUsersQuery {
+    since: Option<String>,
+    limit: Option<i64>,
+}
+
+#[instrument(skip(state))]
+async fn top_spammy_users(
+    State(state): State<Arc<ApiState>>,
+    Query(query): Query<SpammyUsersQuery>,
+) -> ApiResult<Json<Vec<SpammyUserDto>>> {
+    let since = match query.since {
+        Some(ref value) => Some(parse_since(value)?),
+        None => None,
+    };
+    let limit = query.limit.unwrap_or(20).clamp(1, 100);
+    let rows = state
+        .repositories
+        .spam_flags()
+        .top_spammy_users(since, limit)
+        .await?;
+    Ok(Json(rows.into_iter().map(SpammyUserDto::from).collect()))
+}
+
+#[instrument]
+async fn metrics() -> ApiResult<impl IntoResponse> {
+    let encoder = prometheus::TextEncoder::new();
+    let metric_families = prometheus::gather();
+    let mut buffer = Vec::new();
+    encoder
+        .encode(&metric_families, &mut buffer)
+        .map_err(|err| ApiError::Internal(err.to_string()))?;
+    Ok((
+        axum::http::StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, encoder.format_type())],
+        buffer,
+    ))
+}
+
+fn parse_spam_filter(value: &str) -> ApiResult<SpamFilter> {
+    match value.to_ascii_lowercase().as_str() {
+        "likely" => Ok(SpamFilter::Likely),
+        "suspicious" => Ok(SpamFilter::Suspicious),
+        "all" => Ok(SpamFilter::All),
+        other => Err(ApiError::bad_request(format!(
+            "invalid spam filter: {}",
+            other
+        ))),
+    }
+}
+
+fn parse_since(value: &str) -> ApiResult<DateTime<Utc>> {
+    if let Ok(dt) = DateTime::parse_from_rfc3339(value) {
+        return Ok(dt.with_timezone(&Utc));
+    }
+    if let Ok(date) = NaiveDate::parse_from_str(value, "%Y-%m-%d") {
+        if let Some(dt) = date.and_hms_opt(0, 0, 0) {
+            return Ok(DateTime::<Utc>::from_utc(dt, Utc));
+        }
+    }
+    Err(ApiError::bad_request("invalid since parameter"))
+}

@@ -1,0 +1,65 @@
+{
+  "id": null,
+  "title": "GitHub Spam Lab",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Broker Rate Remaining",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "gh_broker_rate_remaining",
+          "legendFormat": "{{token}}/{{budget}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Broker Queue Length",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "gh_broker_queue_length",
+          "legendFormat": "{{budget}}/{{priority}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Broker Latency (P95)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(gh_broker_latency_seconds_bucket[5m])) by (le, budget))",
+          "legendFormat": "{{budget}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Broker Retry Count",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "expr": "rate(gh_broker_retries_total[5m])",
+          "legendFormat": "{{budget}}/{{reason}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Cache Hit Ratio",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "targets": [
+        {
+          "expr": "sum(rate(gh_broker_cache_hits_total[5m])) by (budget) / sum(rate(gh_broker_cache_hits_total[5m]) + rate(gh_broker_cache_misses_total[5m])) by (budget)",
+          "legendFormat": "{{budget}}"
+        }
+      ]
+    }
+  ]
+}
