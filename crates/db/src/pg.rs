@@ -16,10 +16,10 @@ use crate::repositories::{
 };
 
 pub async fn run_migrations(pool: &PgPool) -> Result<()> {
-    sqlx::migrate!("../migrations")
+    sqlx::migrate!("../../migrations")
         .run(pool)
         .await
-        .map_err(DbError::Query)
+        .map_err(DbError::Migration)
 }
 
 #[derive(Clone)]

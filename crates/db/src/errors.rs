@@ -2,6 +2,8 @@
 pub enum DbError {
     #[error("query error: {0}")]
     Query(#[source] sqlx::Error),
+    #[error("migration error: {0}")]
+    Migration(#[source] sqlx::migrate::MigrateError),
     #[error("not found")]
     NotFound,
     #[error("configuration error: {0}")]
