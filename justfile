@@ -1,11 +1,15 @@
 set dotenv-load := true
 
-database_url := env_var('DATABASE_URL', 'postgres://postgres:postgres@localhost:5432/github_spam')
+database_url := env_var_or_default('DATABASE_URL', 'postgres://postgres:postgres@localhost:5432/github_spam')
 
-alias fmt = format
-alias lint = check
+alias fmt := format
+alias lint := check
 
 # Tooling
+
+default:
+  @echo "Available tasks:"
+  @just --list
 
 aqua-install:
 	aqua i -l
@@ -31,8 +35,8 @@ dist-down:
 # Database
 
 db-create:
-	psql "{{database_url}}" -c 'select 1;' 2>/dev/null || \
-	psql "{{database_url | replace("/github_spam", "/postgres")}}" -c 'create database github_spam;'
+	psql '{{ database_url }}' -c 'select 1;' 2>/dev/null || \
+	psql '{{ replace(database_url, "/github_spam", "/postgres") }}' -c 'create database github_spam;'
 
 migrate:
 	sqlx migrate run
