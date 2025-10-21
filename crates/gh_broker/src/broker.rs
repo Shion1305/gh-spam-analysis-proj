@@ -276,8 +276,18 @@ impl Inner {
                 .map(|entry| entry.waiters)
                 .unwrap_or_default()
         };
-        for waiter in waiters {
-            let _ = waiter.send(result.clone());
+        match &result {
+            Ok(response) => {
+                for waiter in waiters {
+                    let _ = waiter.send(Ok(response.clone()));
+                }
+            }
+            Err(e) => {
+                let err_msg = e.to_string();
+                for waiter in waiters {
+                    let _ = waiter.send(Err(anyhow::anyhow!("{}", err_msg)));
+                }
+            }
         }
     }
 
@@ -479,7 +489,7 @@ async fn run_budget(
 async fn process_work(inner: Arc<Inner>, budget: Budget, work: WorkItem) {
     let key = work.key.clone();
     let mut attempt = 0;
-    let mut request = work.request;
+    let request = work.request;
     loop {
         attempt += 1;
         match execute_once(inner.clone(), budget, &work.cached, request.clone()).await {
@@ -594,7 +604,7 @@ async fn execute_once(
 
             if status.is_success() {
                 let cache_key = request.key().to_string();
-                let mut response = BrokerResponse::from_http(resp);
+                let response = BrokerResponse::from_http(resp);
                 if request.method() == http::Method::GET {
                     metrics::CACHE_MISSES
                         .with_label_values(&[budget_label(budget)])
@@ -642,14 +652,7 @@ async fn execute_once(
 
             Err(anyhow::anyhow!("unexpected status {}", status))
         }
-        Err(err) => {
-            metrics::INFLIGHT
-                .with_label_values(&[budget_label(budget)])
-                .dec();
-            drop(permit);
-            drop(repo_permit);
-            Err(err)
-        }
+        Err(err) => Err(err),
     }
 }
 
