@@ -4,6 +4,13 @@ use serde::{Deserialize, Serialize};
 
 use db::{CommentRow, IssueRow, UserRow};
 
+macro_rules! lazy_regex {
+    ($name:ident = $pattern:expr) => {
+        static $name: once_cell::sync::Lazy<Regex> =
+            once_cell::sync::Lazy::new(|| Regex::new($pattern).expect("invalid regex"));
+    };
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct ContributionStats {
     pub posts_last_24h: u32,
@@ -179,13 +186,6 @@ fn account_age_days(user: Option<&UserRow>) -> Option<f32> {
     let created_at = user.created_at?;
     let age = Utc::now() - created_at;
     Some(age.num_seconds().max(0) as f32 / 86_400.0)
-}
-
-macro_rules! lazy_regex {
-    ($name:ident = $pattern:expr) => {
-        static $name: once_cell::sync::Lazy<Regex> =
-            once_cell::sync::Lazy::new(|| Regex::new($pattern).expect("invalid regex"));
-    };
 }
 
 mod emojis {
