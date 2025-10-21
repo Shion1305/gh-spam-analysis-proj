@@ -48,7 +48,7 @@ mod tests {
 
     #[test]
     fn collapse_limits_repeats() {
-        assert_eq!(collapse_repeats("heyyyy!!!", 3), "heyy!!!");
+        assert_eq!(collapse_repeats("heyyyy!!!", 3), "heyyy!!!");
     }
 
     #[test]
