@@ -1,4 +1,3 @@
-use chrono::Utc;
 use common::text::dedupe_hash;
 use serde_json::Value;
 
@@ -67,6 +66,7 @@ pub fn normalize_comment(payload: &CommentPayload, issue_id: i64, raw: Value) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
     use serde_json::json;
 
     #[test]
