@@ -1,0 +1,16 @@
+apiVersion: v2
+name: github-spam-lab
+description: Helm chart for deploying the GitHub Spam Lab services
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - rust
+  - github
+  - spam
+  - analytics
+sources:
+  - https://github.com/Shion1305/gh-spam-analysis-proj
+maintainers:
+  - name: GitHub Spam Lab Maintainers
+    email: shion1305@gmail.com

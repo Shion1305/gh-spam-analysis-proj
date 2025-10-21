@@ -1,0 +1,38 @@
+{{- if .Values.collector.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "github-spam-lab.fullname" . }}-collector
+  labels:
+    {{- include "github-spam-lab.labels" . | nindent 4 }}
+    component: collector
+spec:
+  replicas: {{ .Values.collector.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "github-spam-lab.selectorLabels" . | nindent 6 }}
+      component: collector
+  template:
+    metadata:
+      labels:
+        {{- include "github-spam-lab.selectorLabels" . | nindent 8 }}
+        component: collector
+    spec:
+      serviceAccountName: {{ include "github-spam-lab.serviceAccountName" . }}
+      containers:
+        - name: collector
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/usr/local/bin/collector"]
+          env:
+            - name: DATABASE_URL
+              value: {{ printf "postgres://%s:%s@%s:%d/%s" .Values.postgres.user .Values.postgres.password .Values.postgres.host .Values.postgres.port .Values.postgres.database | quote }}
+            {{- range .Values.collector.env }}
+            - {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- range .Values.extraEnv }}
+            - {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.collector.resources | nindent 12 }}
+{{- end }}
