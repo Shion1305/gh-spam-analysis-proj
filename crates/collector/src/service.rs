@@ -5,7 +5,10 @@ use std::time::{Duration, Instant};
 use analysis::{score_comment, score_issue, ContributionStats, RuleEngine};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use db::models::{CommentRow, IssueRow, RepositoryRow, SpamFlagUpsert, UserRow, WatermarkUpdate};
+use db::models::{
+    CollectionJobUpdate, CollectionStatus, CommentRow, IssueRow, RepositoryRow, SpamFlagUpsert,
+    UserRow, WatermarkUpdate,
+};
 use db::Repositories;
 use normalizer::models::{
     NormalizedComment, NormalizedIssue, NormalizedRepository, NormalizedUser,
@@ -39,6 +42,7 @@ struct ProcessContext<'a> {
     user_cache: &'a mut HashSet<String>,
     session_counts: &'a mut HashMap<String, u32>,
     dedupe_counts: &'a mut HashMap<String, u32>,
+    repo_full_name: &'a str,
 }
 
 impl<C: GithubClient + 'static> Collector<C> {
@@ -68,25 +72,40 @@ impl<C: GithubClient + 'static> Collector<C> {
         metrics::LAST_RUN_TIMESTAMP.set(run_started.timestamp());
         let _timer = metrics::RUN_DURATION.start_timer();
 
-        let seeds = match load_seed_repos(&self.config.seed_repos_path)
+        let pending_jobs = match self
+            .repos
+            .collection_jobs()
+            .get_pending(100)
             .await
-            .context("loading seed repositories")
+            .context("loading pending collection jobs")
         {
-            Ok(seeds) => seeds,
+            Ok(jobs) => jobs,
             Err(err) => {
                 metrics::RUN_FAILURES_TOTAL.inc();
                 metrics::RUN_ERRORS_TOTAL.inc();
                 return Err(err);
             }
         };
-        metrics::SEED_REPOS.set(seeds.len() as i64);
-        info!(count = seeds.len(), "loaded seed repositories");
+        metrics::SEED_REPOS.set(pending_jobs.len() as i64);
+        info!(count = pending_jobs.len(), "loaded pending collection jobs");
         let rule_version = RuleEngine::default().version().to_string();
         let mut session_counts = HashMap::new();
         let mut dedupe_counts = HashMap::new();
         let mut repo_errors = 0u64;
-        for seed in seeds {
+
+        for job in pending_jobs {
+            // Mark job as in progress
+            if let Err(err) = self.repos.collection_jobs().mark_in_progress(job.id).await {
+                warn!(job_id = job.id, error = ?err, "failed to mark job as in_progress");
+                continue;
+            }
+
             let repo_started = Instant::now();
+            let seed = SeedRepo {
+                owner: job.owner.clone(),
+                name: job.name.clone(),
+            };
+
             match self
                 .process_repo(
                     &seed,
@@ -103,6 +122,20 @@ impl<C: GithubClient + 'static> Collector<C> {
                     metrics::REPO_DURATION
                         .with_label_values(&["success"])
                         .observe(repo_started.elapsed().as_secs_f64());
+
+                    // Mark job as completed
+                    if let Err(err) = self
+                        .repos
+                        .collection_jobs()
+                        .update(CollectionJobUpdate {
+                            id: job.id,
+                            status: CollectionStatus::Completed,
+                            error_message: None,
+                        })
+                        .await
+                    {
+                        warn!(job_id = job.id, error = ?err, "failed to mark job as completed");
+                    }
                 }
                 Err(err) => {
                     repo_errors = repo_errors.saturating_add(1);
@@ -113,12 +146,28 @@ impl<C: GithubClient + 'static> Collector<C> {
                     metrics::REPO_DURATION
                         .with_label_values(&["error"])
                         .observe(repo_started.elapsed().as_secs_f64());
+
+                    let error_message = err.to_string();
                     warn!(
                         owner = %seed.owner,
                         repo = %seed.name,
                         error = ?err,
                         "failed to ingest repository"
                     );
+
+                    // Mark job as failed
+                    if let Err(update_err) = self
+                        .repos
+                        .collection_jobs()
+                        .update(CollectionJobUpdate {
+                            id: job.id,
+                            status: CollectionStatus::Failed,
+                            error_message: Some(error_message),
+                        })
+                        .await
+                    {
+                        warn!(job_id = job.id, error = ?update_err, "failed to mark job as failed");
+                    }
                 }
             }
         }
@@ -139,6 +188,7 @@ impl<C: GithubClient + 'static> Collector<C> {
         dedupe_counts: &mut HashMap<String, u32>,
     ) -> Result<()> {
         let _active_repo = ActiveRepoGuard::new();
+        let repo_full_name = format!("{}/{}", seed.owner, seed.name);
         let repo_value = self
             .client
             .get_repo(&seed.owner, &seed.name)
@@ -201,7 +251,9 @@ impl<C: GithubClient + 'static> Collector<C> {
                 let dedupe_hits = record_dedupe(dedupe_counts, &normalized_issue.dedupe_hash);
 
                 self.repos.issues().upsert(issue_row.clone()).await?;
-                metrics::ISSUES_PROCESSED_TOTAL.inc();
+                metrics::ISSUES_PROCESSED_TOTAL
+                    .with_label_values(&[&repo_full_name])
+                    .inc();
                 let stats = ContributionStats {
                     posts_last_24h: posts_before,
                     dedupe_hits_last_48h: dedupe_hits,
@@ -230,6 +282,7 @@ impl<C: GithubClient + 'static> Collector<C> {
                         user_cache: &mut user_cache,
                         session_counts,
                         dedupe_counts,
+                        repo_full_name: &repo_full_name,
                     };
                     self.process_comments(&issue_row, &seed.owner, &seed.name, &mut ctx)
                         .await?;
@@ -296,7 +349,9 @@ impl<C: GithubClient + 'static> Collector<C> {
 
                 let comment_row = to_comment_row(&normalized_comment);
                 self.repos.comments().upsert(comment_row.clone()).await?;
-                metrics::COMMENTS_PROCESSED_TOTAL.inc();
+                metrics::COMMENTS_PROCESSED_TOTAL
+                    .with_label_values(&[ctx.repo_full_name])
+                    .inc();
                 let stats = ContributionStats {
                     posts_last_24h: posts_before,
                     dedupe_hits_last_48h: dedupe_hits,

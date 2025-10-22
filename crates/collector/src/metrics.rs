@@ -77,18 +77,20 @@ pub static REPOS_PROCESSED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     .expect("collector repositories processed")
 });
 
-pub static ISSUES_PROCESSED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
-    register_int_counter!(
+pub static ISSUES_PROCESSED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_int_counter_vec!(
         "collector_issues_processed_total",
-        "Total number of issues normalized and upserted by the collector"
+        "Total number of issues normalized and upserted by the collector per repository",
+        &["repo"]
     )
     .expect("collector issues processed")
 });
 
-pub static COMMENTS_PROCESSED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
-    register_int_counter!(
+pub static COMMENTS_PROCESSED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_int_counter_vec!(
         "collector_comments_processed_total",
-        "Total number of comments normalized and upserted by the collector"
+        "Total number of comments normalized and upserted by the collector per repository",
+        &["repo"]
     )
     .expect("collector comments processed")
 });
