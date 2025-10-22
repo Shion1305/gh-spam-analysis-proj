@@ -35,6 +35,9 @@ services:
       API__BIND: 0.0.0.0:3000
     ports:
       - "3000:3000"
+    volumes:
+      - ../config:/srv/app/config:ro
+      - ../scripts:/srv/app/scripts:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -45,6 +48,9 @@ services:
     environment:
       DATABASE__URL: postgres://postgres:postgres@postgres:5432/github_spam
     command: ["/usr/local/bin/collector"]
+    volumes:
+      - ../config:/srv/app/config:ro
+      - ../scripts:/srv/app/scripts:ro
     depends_on:
       postgres:
         condition: service_healthy
