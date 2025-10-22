@@ -3,11 +3,42 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use gh_broker::{GithubBroker, Priority};
-use http::{header, Request};
+use gh_broker::{GithubBroker, HttpStatusError, Priority};
+use http::{header, Request, StatusCode};
 use serde_json::Value;
+use thiserror::Error;
 use tracing::instrument;
 use url::Url;
+
+#[derive(Debug, Error)]
+pub enum GithubApiError {
+    #[error("github api error: {status} for {endpoint}")]
+    Http {
+        status: StatusCode,
+        endpoint: String,
+    },
+}
+
+impl GithubApiError {
+    pub fn status(status: StatusCode, endpoint: impl Into<String>) -> Self {
+        Self::Http {
+            status,
+            endpoint: endpoint.into(),
+        }
+    }
+
+    pub fn status_code(&self) -> StatusCode {
+        match *self {
+            GithubApiError::Http { status, .. } => status,
+        }
+    }
+
+    pub fn endpoint(&self) -> &str {
+        match self {
+            GithubApiError::Http { endpoint, .. } => endpoint.as_str(),
+        }
+    }
+}
 
 #[async_trait]
 pub trait GithubClient: Send + Sync {
@@ -47,15 +78,25 @@ impl BrokerGithubClient {
     }
 
     async fn get_json(&self, url: Url, priority: Priority) -> Result<Value> {
-        let response = self.execute(url, priority).await?;
-        if response.status().is_success() {
+        let endpoint = url.path().trim_start_matches('/').to_string();
+        let response = match self.execute(url, priority).await {
+            Ok(resp) => resp,
+            Err(err) => {
+                if let Some(status_err) = err.downcast_ref::<HttpStatusError>() {
+                    return Err(GithubApiError::status(status_err.status, endpoint).into());
+                }
+                return Err(err);
+            }
+        };
+        let status = response.status();
+        if status.is_success() {
             let body = response.into_body();
             let value: Value = serde_json::from_slice(&body)?;
             Ok(value)
-        } else if response.status().as_u16() == 304 {
+        } else if status == StatusCode::NOT_MODIFIED {
             Err(anyhow!("received 304 without cached entity"))
         } else {
-            Err(anyhow!("github api error: {}", response.status().as_u16()))
+            Err(GithubApiError::status(status, endpoint).into())
         }
     }
 

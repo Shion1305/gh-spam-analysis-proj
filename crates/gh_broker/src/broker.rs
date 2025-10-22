@@ -12,6 +12,7 @@ use tracing::warn;
 
 use crate::backoff::exponential_jitter_backoff;
 use crate::cache::{CachedResponse, ResponseCache};
+use crate::error::HttpStatusError;
 use crate::metrics;
 use crate::model::{parse_rate_limit, parse_retry_after, Budget, GithubRequest, RetryAdvice};
 use crate::token::{GithubToken, TokenPool, TokenSelection};
@@ -657,7 +658,7 @@ async fn execute_once(
                 return Err(anyhow::anyhow!("secondary rate limit"));
             }
 
-            Err(anyhow::anyhow!("unexpected status {}", status))
+            Err(HttpStatusError::new(status).into())
         }
         Err(err) => Err(err),
     }

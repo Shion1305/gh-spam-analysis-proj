@@ -10,6 +10,7 @@ use db::models::{
     UserRow, WatermarkUpdate,
 };
 use db::Repositories;
+use http::StatusCode;
 use normalizer::models::{
     NormalizedComment, NormalizedIssue, NormalizedRepository, NormalizedUser,
 };
@@ -21,7 +22,7 @@ use serde::Deserialize;
 use tokio::time::sleep;
 use tracing::{info, instrument, warn};
 
-use crate::client::GithubClient;
+use crate::client::{GithubApiError, GithubClient};
 use crate::metrics::{self, ActiveRepoGuard};
 use common::config::CollectorConfig;
 
@@ -163,6 +164,9 @@ impl<C: GithubClient + 'static> Collector<C> {
                         metrics::REPO_JOB_STATUS
                             .with_label_values(&[&job.full_name, "failed"])
                             .set(0);
+                        metrics::REPO_JOB_STATUS
+                            .with_label_values(&[&job.full_name, "error"])
+                            .set(0);
                         metrics::REPO_JOB_FAILURE_COUNT
                             .with_label_values(&[&job.full_name])
                             .set(0);
@@ -181,43 +185,85 @@ impl<C: GithubClient + 'static> Collector<C> {
                         .with_label_values(&["error"])
                         .observe(repo_started.elapsed().as_secs_f64());
 
+                    // Determine if this is a permanent error or a transient failure
+                    let status = if is_permanent_error(&err) {
+                        warn!(
+                            owner = %seed.owner,
+                            repo = %seed.name,
+                            error = ?err,
+                            "permanent error - will not retry"
+                        );
+                        CollectionStatus::Error
+                    } else {
+                        warn!(
+                            owner = %seed.owner,
+                            repo = %seed.name,
+                            error = ?err,
+                            "transient failure - will retry"
+                        );
+                        CollectionStatus::Failed
+                    };
                     let error_message = err.to_string();
-                    warn!(
-                        owner = %seed.owner,
-                        repo = %seed.name,
-                        error = ?err,
-                        "failed to ingest repository"
-                    );
 
-                    // Mark job as failed
+                    // Mark job with appropriate status
                     if let Err(update_err) = self
                         .repos
                         .collection_jobs()
                         .update(CollectionJobUpdate {
                             id: job.id,
-                            status: CollectionStatus::Failed,
+                            status: status.clone(),
                             error_message: Some(error_message),
                         })
                         .await
                     {
-                        warn!(job_id = job.id, error = ?update_err, "failed to mark job as failed");
+                        warn!(job_id = job.id, error = ?update_err, "failed to update job status");
                     } else {
-                        // Update metrics for failed job (returns to pending)
-                        metrics::REPO_JOB_STATUS
-                            .with_label_values(&[&job.full_name, "pending"])
-                            .set(1);
-                        metrics::REPO_JOB_STATUS
-                            .with_label_values(&[&job.full_name, "completed"])
-                            .set(0);
-                        metrics::REPO_JOB_STATUS
-                            .with_label_values(&[&job.full_name, "in_progress"])
-                            .set(0);
-                        metrics::REPO_JOB_STATUS
-                            .with_label_values(&[&job.full_name, "failed"])
-                            .set(1);
-                        metrics::REPO_JOB_FAILURE_COUNT
-                            .with_label_values(&[&job.full_name])
-                            .set((job.failure_count + 1) as i64);
+                        // Update metrics based on status
+                        match status {
+                            CollectionStatus::Error => {
+                                // Permanent error - stays in error state, won't retry
+                                metrics::REPO_JOB_STATUS
+                                    .with_label_values(&[&job.full_name, "error"])
+                                    .set(1);
+                                metrics::REPO_JOB_STATUS
+                                    .with_label_values(&[&job.full_name, "pending"])
+                                    .set(0);
+                                metrics::REPO_JOB_STATUS
+                                    .with_label_values(&[&job.full_name, "completed"])
+                                    .set(0);
+                                metrics::REPO_JOB_STATUS
+                                    .with_label_values(&[&job.full_name, "in_progress"])
+                                    .set(0);
+                                metrics::REPO_JOB_STATUS
+                                    .with_label_values(&[&job.full_name, "failed"])
+                                    .set(0);
+                                metrics::REPO_JOB_FAILURE_COUNT
+                                    .with_label_values(&[&job.full_name])
+                                    .set((job.failure_count + 1) as i64);
+                            }
+                            CollectionStatus::Failed => {
+                                // Transient failure - returns to pending for retry
+                                metrics::REPO_JOB_STATUS
+                                    .with_label_values(&[&job.full_name, "pending"])
+                                    .set(1);
+                                metrics::REPO_JOB_STATUS
+                                    .with_label_values(&[&job.full_name, "completed"])
+                                    .set(0);
+                                metrics::REPO_JOB_STATUS
+                                    .with_label_values(&[&job.full_name, "in_progress"])
+                                    .set(0);
+                                metrics::REPO_JOB_STATUS
+                                    .with_label_values(&[&job.full_name, "failed"])
+                                    .set(1);
+                                metrics::REPO_JOB_STATUS
+                                    .with_label_values(&[&job.full_name, "error"])
+                                    .set(0);
+                                metrics::REPO_JOB_FAILURE_COUNT
+                                    .with_label_values(&[&job.full_name])
+                                    .set((job.failure_count + 1) as i64);
+                            }
+                            _ => {}
+                        }
                     }
                 }
             }
@@ -517,6 +563,52 @@ fn record_dedupe(counts: &mut HashMap<String, u32>, hash: &str) -> u32 {
     current
 }
 
+/// Determines if an error is permanent (will not retry) or transient (will retry)
+///
+/// Permanent errors include:
+/// - 404 Not Found - repository doesn't exist
+/// - 403 Forbidden - access denied, private repo, or suspended account
+/// - 451 Unavailable For Legal Reasons - DMCA takedown, etc.
+/// - 410 Gone - resource permanently deleted
+///
+/// Transient errors include:
+/// - 5xx Server errors - GitHub API issues
+/// - 429 Rate limit - will retry when rate limit resets
+/// - Network errors - timeouts, connection issues
+/// - Other errors - parsing issues, etc.
+fn is_permanent_error(err: &anyhow::Error) -> bool {
+    if let Some(api_err) = err.downcast_ref::<GithubApiError>() {
+        return match api_err {
+            GithubApiError::Http { status, endpoint } => match *status {
+                StatusCode::NOT_FOUND => {
+                    let segments: Vec<&str> = endpoint
+                        .trim_matches('/')
+                        .split('/')
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    segments.len() == 3 && segments[0] == "repos"
+                }
+                StatusCode::FORBIDDEN
+                | StatusCode::UNAVAILABLE_FOR_LEGAL_REASONS
+                | StatusCode::GONE => true,
+                _ => false,
+            },
+        };
+    }
+
+    // Fallback to string matching when error type is unknown
+    let error_msg = err.to_string();
+    if error_msg.contains("404") {
+        let is_repo_fetch = error_msg.contains("fetching repo")
+            || (error_msg.contains("github api error: 404")
+                && error_msg.contains("repos/")
+                && !error_msg.contains("issues")
+                && !error_msg.contains("comments"));
+        return is_repo_fetch;
+    }
+    error_msg.contains("403") || error_msg.contains("451") || error_msg.contains("410")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -533,5 +625,23 @@ mod tests {
         let mut counts = HashMap::new();
         assert_eq!(record_dedupe(&mut counts, "hash"), 0);
         assert_eq!(record_dedupe(&mut counts, "hash"), 1);
+    }
+
+    #[test]
+    fn repo_not_found_is_permanent() {
+        let err = anyhow::Error::new(GithubApiError::status(
+            StatusCode::NOT_FOUND,
+            "repos/foo/bar",
+        ));
+        assert!(is_permanent_error(&err));
+    }
+
+    #[test]
+    fn issue_not_found_is_transient() {
+        let err = anyhow::Error::new(GithubApiError::status(
+            StatusCode::NOT_FOUND,
+            "repos/foo/bar/issues",
+        ));
+        assert!(!is_permanent_error(&err));
     }
 }
