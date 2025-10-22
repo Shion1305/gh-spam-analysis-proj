@@ -614,7 +614,7 @@ impl CollectionJobRepository for PgCollectionJobRepository {
             ON CONFLICT (owner, name) DO UPDATE
                 SET priority = EXCLUDED.priority,
                     updated_at = now()
-            RETURNING id, owner, name, full_name, status as "status: _", priority, 
+            RETURNING id, owner, name, full_name, status, priority,
                       last_attempt_at, last_completed_at, failure_count, error_message,
                       created_at, updated_at
             "#,
@@ -630,7 +630,7 @@ impl CollectionJobRepository for PgCollectionJobRepository {
     async fn get_pending(&self, limit: i32) -> Result<Vec<CollectionJobRow>> {
         sqlx::query_as::<_, CollectionJobRow>(
             r#"
-            SELECT id, owner, name, full_name, status as "status: _", priority,
+            SELECT id, owner, name, full_name, status, priority,
                    last_attempt_at, last_completed_at, failure_count, error_message,
                    created_at, updated_at
             FROM collection_jobs
@@ -721,7 +721,7 @@ impl CollectionJobRepository for PgCollectionJobRepository {
     async fn list(&self, limit: i32) -> Result<Vec<CollectionJobRow>> {
         sqlx::query_as::<_, CollectionJobRow>(
             r#"
-            SELECT id, owner, name, full_name, status as "status: _", priority,
+            SELECT id, owner, name, full_name, status, priority,
                    last_attempt_at, last_completed_at, failure_count, error_message,
                    created_at, updated_at
             FROM collection_jobs
