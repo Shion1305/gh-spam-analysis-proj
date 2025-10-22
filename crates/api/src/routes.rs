@@ -5,10 +5,10 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
 use chrono::{DateTime, NaiveDate, Utc};
-use db::models::{IssueQuery, SpamFilter};
+use db::models::{CollectionJobCreate, IssueQuery, SpamFilter};
 use db::Repositories;
 use prometheus::Encoder;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::instrument;
 
@@ -25,7 +25,8 @@ pub fn build_router(state: Arc<ApiState>) -> Router {
     let metrics_path: &'static str = state.metrics_path;
     Router::new()
         .route("/healthz", get(healthz))
-        .route("/repos", get(list_repos))
+        .route("/repos", get(list_repos).post(register_repo))
+        .route("/collection-jobs", get(list_collection_jobs))
         .route("/issues", get(list_issues))
         .route("/actors/:login", get(get_actor))
         .route("/top/spammy-users", get(top_spammy_users))
@@ -166,4 +167,84 @@ fn parse_since(value: &str) -> ApiResult<DateTime<Utc>> {
         }
     }
     Err(ApiError::bad_request("invalid since parameter"))
+}
+
+#[derive(Debug, Deserialize)]
+struct RegisterRepoRequest {
+    owner: String,
+    name: String,
+    #[serde(default)]
+    priority: i32,
+}
+
+#[derive(Debug, Serialize)]
+struct CollectionJobResponse {
+    id: i64,
+    owner: String,
+    name: String,
+    full_name: String,
+    status: String,
+    priority: i32,
+    failure_count: i32,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+#[instrument(skip(state))]
+async fn register_repo(
+    State(state): State<Arc<ApiState>>,
+    Json(request): Json<RegisterRepoRequest>,
+) -> ApiResult<Json<CollectionJobResponse>> {
+    let job = state
+        .repositories
+        .collection_jobs()
+        .create(CollectionJobCreate {
+            owner: request.owner,
+            name: request.name,
+            priority: request.priority,
+        })
+        .await?;
+
+    Ok(Json(CollectionJobResponse {
+        id: job.id,
+        owner: job.owner,
+        name: job.name,
+        full_name: job.full_name,
+        status: format!("{:?}", job.status),
+        priority: job.priority,
+        failure_count: job.failure_count,
+        created_at: job.created_at,
+        updated_at: job.updated_at,
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+struct CollectionJobsQuery {
+    limit: Option<i32>,
+}
+
+#[instrument(skip(state))]
+async fn list_collection_jobs(
+    State(state): State<Arc<ApiState>>,
+    Query(query): Query<CollectionJobsQuery>,
+) -> ApiResult<Json<Vec<CollectionJobResponse>>> {
+    let limit = query.limit.unwrap_or(50).clamp(1, 500);
+    let jobs = state.repositories.collection_jobs().list(limit).await?;
+
+    let response = jobs
+        .into_iter()
+        .map(|job| CollectionJobResponse {
+            id: job.id,
+            owner: job.owner,
+            name: job.name,
+            full_name: job.full_name,
+            status: format!("{:?}", job.status),
+            priority: job.priority,
+            failure_count: job.failure_count,
+            created_at: job.created_at,
+            updated_at: job.updated_at,
+        })
+        .collect();
+
+    Ok(Json(response))
 }
