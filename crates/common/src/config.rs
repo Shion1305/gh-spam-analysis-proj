@@ -185,11 +185,17 @@ pub struct ApiConfig {
 pub struct ObservabilityConfig {
     #[serde(default = "ObservabilityConfig::default_metrics_path")]
     pub metrics_path: String,
+    #[serde(default = "ObservabilityConfig::default_metrics_bind")]
+    pub metrics_bind: String,
 }
 
 impl ObservabilityConfig {
     fn default_metrics_path() -> String {
         "/metrics".to_string()
+    }
+
+    fn default_metrics_bind() -> String {
+        "0.0.0.0:9091".to_string()
     }
 }
 

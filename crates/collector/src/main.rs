@@ -1,14 +1,20 @@
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
+use axum::http::{header, StatusCode};
+use axum::response::{IntoResponse, Response};
+use axum::routing::get;
+use axum::Router;
 use collector::{BrokerGithubClient, Collector};
 use common::{config::AppConfig, logging};
 use db::pg::PgDatabase;
 use db::Repositories;
 use gh_broker::{Budget, GithubBrokerBuilder, GithubToken as BrokerToken, Priority};
-use tracing::info;
+use prometheus::Encoder;
+use tracing::{info, warn};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -47,6 +53,15 @@ async fn main() -> Result<()> {
         builder = builder.weights(map_weights(&config.broker.weights));
     }
 
+    let metrics_path: &'static str =
+        Box::leak(config.observability.metrics_path.clone().into_boxed_str());
+    let metrics_addr: SocketAddr = config.observability.metrics_bind.parse()?;
+    tokio::spawn(async move {
+        if let Err(err) = serve_metrics(metrics_addr, metrics_path).await {
+            warn!(error = ?err, "collector metrics server exited");
+        }
+    });
+
     let broker = builder.build();
     let client = Arc::new(BrokerGithubClient::new(
         broker,
@@ -63,6 +78,51 @@ async fn main() -> Result<()> {
     );
     collector.run().await?;
     Ok(())
+}
+
+async fn serve_metrics(addr: SocketAddr, metrics_path: &'static str) -> Result<()> {
+    let app = Router::new()
+        .route("/healthz", get(healthz))
+        .route(metrics_path, get(export_metrics));
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    info!(
+        address = %addr,
+        path = metrics_path,
+        "collector metrics server listening"
+    );
+    axum::serve(listener, app).await?;
+    Ok(())
+}
+
+async fn healthz() -> &'static str {
+    "ok"
+}
+
+async fn export_metrics() -> Response {
+    let encoder = prometheus::TextEncoder::new();
+    let metric_families = prometheus::gather();
+    let mut buffer = Vec::new();
+
+    match encoder.encode(&metric_families, &mut buffer) {
+        Ok(()) => {
+            let content_type = encoder.format_type().to_string();
+            (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, content_type)],
+                buffer,
+            )
+                .into_response()
+        }
+        Err(err) => {
+            warn!(error = ?err, "failed to encode collector metrics");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [(header::CONTENT_TYPE, "text/plain".to_string())],
+                b"failed to encode metrics".to_vec(),
+            )
+                .into_response()
+        }
+    }
 }
 
 fn map_queue_bounds(bounds: &HashMap<String, usize>) -> HashMap<(Budget, Priority), usize> {

@@ -1,4 +1,5 @@
 pub mod client;
+pub mod metrics;
 pub mod service;
 
 pub use client::{BrokerGithubClient, GithubClient};

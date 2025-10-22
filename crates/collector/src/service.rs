@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use analysis::{score_comment, score_issue, ContributionStats, RuleEngine};
 use anyhow::{Context, Result};
@@ -19,6 +19,7 @@ use tokio::time::sleep;
 use tracing::{info, instrument, warn};
 
 use crate::client::GithubClient;
+use crate::metrics::{self, ActiveRepoGuard};
 use common::config::CollectorConfig;
 
 #[derive(Debug, Deserialize)]
@@ -62,15 +63,31 @@ impl<C: GithubClient + 'static> Collector<C> {
 
     #[instrument(skip(self))]
     pub async fn run_once(&self) -> Result<()> {
-        let seeds = load_seed_repos(&self.config.seed_repos_path)
+        let run_started = Utc::now();
+        metrics::RUNS_TOTAL.inc();
+        metrics::LAST_RUN_TIMESTAMP.set(run_started.timestamp());
+        let _timer = metrics::RUN_DURATION.start_timer();
+
+        let seeds = match load_seed_repos(&self.config.seed_repos_path)
             .await
-            .context("loading seed repositories")?;
+            .context("loading seed repositories")
+        {
+            Ok(seeds) => seeds,
+            Err(err) => {
+                metrics::RUN_FAILURES_TOTAL.inc();
+                metrics::RUN_ERRORS_TOTAL.inc();
+                return Err(err);
+            }
+        };
+        metrics::SEED_REPOS.set(seeds.len() as i64);
         info!(count = seeds.len(), "loaded seed repositories");
         let rule_version = RuleEngine::default().version().to_string();
         let mut session_counts = HashMap::new();
         let mut dedupe_counts = HashMap::new();
+        let mut repo_errors = 0u64;
         for seed in seeds {
-            if let Err(err) = self
+            let repo_started = Instant::now();
+            match self
                 .process_repo(
                     &seed,
                     &rule_version,
@@ -79,13 +96,37 @@ impl<C: GithubClient + 'static> Collector<C> {
                 )
                 .await
             {
-                warn!(
-                    owner = %seed.owner,
-                    repo = %seed.name,
-                    error = ?err,
-                    "failed to ingest repository"
-                );
+                Ok(_) => {
+                    metrics::REPOS_PROCESSED_TOTAL
+                        .with_label_values(&["success"])
+                        .inc();
+                    metrics::REPO_DURATION
+                        .with_label_values(&["success"])
+                        .observe(repo_started.elapsed().as_secs_f64());
+                }
+                Err(err) => {
+                    repo_errors = repo_errors.saturating_add(1);
+                    metrics::RUN_ERRORS_TOTAL.inc();
+                    metrics::REPOS_PROCESSED_TOTAL
+                        .with_label_values(&["error"])
+                        .inc();
+                    metrics::REPO_DURATION
+                        .with_label_values(&["error"])
+                        .observe(repo_started.elapsed().as_secs_f64());
+                    warn!(
+                        owner = %seed.owner,
+                        repo = %seed.name,
+                        error = ?err,
+                        "failed to ingest repository"
+                    );
+                }
             }
+        }
+        if repo_errors == 0 {
+            metrics::RUN_SUCCESSES_TOTAL.inc();
+            metrics::LAST_SUCCESS_TIMESTAMP.set(Utc::now().timestamp());
+        } else {
+            metrics::RUN_FAILURES_TOTAL.inc();
         }
         Ok(())
     }
@@ -97,6 +138,7 @@ impl<C: GithubClient + 'static> Collector<C> {
         session_counts: &mut HashMap<String, u32>,
         dedupe_counts: &mut HashMap<String, u32>,
     ) -> Result<()> {
+        let _active_repo = ActiveRepoGuard::new();
         let repo_value = self
             .client
             .get_repo(&seed.owner, &seed.name)
@@ -159,6 +201,7 @@ impl<C: GithubClient + 'static> Collector<C> {
                 let dedupe_hits = record_dedupe(dedupe_counts, &normalized_issue.dedupe_hash);
 
                 self.repos.issues().upsert(issue_row.clone()).await?;
+                metrics::ISSUES_PROCESSED_TOTAL.inc();
                 let stats = ContributionStats {
                     posts_last_24h: posts_before,
                     dedupe_hits_last_48h: dedupe_hits,
@@ -253,6 +296,7 @@ impl<C: GithubClient + 'static> Collector<C> {
 
                 let comment_row = to_comment_row(&normalized_comment);
                 self.repos.comments().upsert(comment_row.clone()).await?;
+                metrics::COMMENTS_PROCESSED_TOTAL.inc();
                 let stats = ContributionStats {
                     posts_last_24h: posts_before,
                     dedupe_hits_last_48h: dedupe_hits,
@@ -281,6 +325,7 @@ impl<C: GithubClient + 'static> Collector<C> {
             return Ok(());
         }
         let user_value = self.client.get_user(login).await?;
+        metrics::USERS_FETCHED_TOTAL.inc();
         let user_payload: UserPayload = serde_json::from_value(user_value.clone())?;
         let normalized_user = normalize_user(&user_payload, user_value);
         let user_row = to_user_row(&normalized_user);

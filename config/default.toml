@@ -27,3 +27,4 @@ bind = "0.0.0.0:3000"
 
 [observability]
 metrics_path = "/metrics"
+metrics_bind = "0.0.0.0:9091"
