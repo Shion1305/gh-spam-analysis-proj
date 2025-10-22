@@ -1,0 +1,11 @@
+.git
+.gitignore
+target
+docker
+dist
+logs
+logs.txt
+tmp
+.env
+.env.*
+*.log

@@ -2,20 +2,23 @@
 
 ARG RUST_VERSION=1.84
 
+FROM rust:${RUST_VERSION} AS chef
+WORKDIR /app
+RUN cargo install cargo-chef --locked
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
 FROM rust:${RUST_VERSION} AS builder
 WORKDIR /app
-
 RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev clang && rm -rf /var/lib/apt/lists/*
-
-COPY Cargo.toml .
-COPY Cargo.lock .
-COPY crates crates
-COPY migrations migrations
-COPY .config .config
-COPY .sqlx .sqlx
-
 ENV SQLX_OFFLINE=true
-RUN cargo build --release -p api -p collector
+COPY --from=chef /usr/local/cargo/bin/cargo-chef /usr/local/cargo/bin/cargo-chef
+COPY --from=chef /app/recipe.json recipe.json
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    cargo chef cook --release --recipe-path recipe.json
+COPY . .
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    cargo build --release -p api -p collector
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
