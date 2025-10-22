@@ -8,7 +8,8 @@ pub enum CollectionStatus {
     Pending,
     InProgress,
     Completed,
-    Failed,
+    Failed, // Transient failure - will retry
+    Error,  // Permanent error - will not retry
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]

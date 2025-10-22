@@ -682,10 +682,28 @@ impl CollectionJobRepository for PgCollectionJobRepository {
                 .await
             }
             CollectionStatus::Failed => {
+                // Transient failure - return to pending for retry
                 sqlx::query(
                     r#"
                     UPDATE collection_jobs
                     SET status = 'pending',
+                        error_message = $1,
+                        failure_count = failure_count + 1,
+                        updated_at = now()
+                    WHERE id = $2
+                    "#,
+                )
+                .bind(update.error_message)
+                .bind(update.id)
+                .execute(&self.pool)
+                .await
+            }
+            CollectionStatus::Error => {
+                // Permanent error - do not retry
+                sqlx::query(
+                    r#"
+                    UPDATE collection_jobs
+                    SET status = 'error',
                         error_message = $1,
                         failure_count = failure_count + 1,
                         updated_at = now()

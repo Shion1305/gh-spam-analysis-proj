@@ -126,7 +126,7 @@ pub static REPO_DURATION: Lazy<HistogramVec> = Lazy::new(|| {
 pub static REPO_JOB_STATUS: Lazy<IntGaugeVec> = Lazy::new(|| {
     register_int_gauge_vec!(
         "collector_repository_job_status",
-        "Current status of collection jobs per repository (1=pending, 2=in_progress, 3=completed, 4=failed)",
+        "Current status of collection jobs per repository (1 if active, 0 if not). Status values: pending, in_progress, completed, failed (transient), error (permanent)",
         &["repo", "status"]
     )
     .expect("collector repository job status")
