@@ -14,7 +14,7 @@ use crate::backoff::exponential_jitter_backoff;
 use crate::cache::{CachedResponse, ResponseCache};
 use crate::error::HttpStatusError;
 use crate::metrics;
-use crate::model::{parse_rate_limit, parse_retry_after, Budget, GithubRequest, RetryAdvice};
+use crate::model::{parse_rate_limit, parse_retry_after, Budget, GithubRequest};
 use crate::token::{GithubToken, TokenPool, TokenSelection};
 
 #[async_trait]
@@ -510,7 +510,14 @@ async fn process_work(inner: Arc<Inner>, budget: Budget, work: WorkItem) {
                     inner.finish(key, Err(err)).await;
                     break;
                 }
-                warn!("request attempt {} failed: {}", attempt, err);
+                warn!(
+                    attempt,
+                    budget = ?budget,
+                    priority = %request.priority.as_str(),
+                    request = %request.key(),
+                    error = %err,
+                    "GitHub request attempt failed"
+                );
                 let backoff = exponential_jitter_backoff(
                     inner.backoff_base,
                     attempt - 1,
@@ -610,6 +617,8 @@ async fn execute_once(
                 }
             }
 
+            let headers = resp.headers().clone();
+
             if status.is_success() {
                 let cache_key = request.key().to_string();
                 let response = BrokerResponse::from_http(resp);
@@ -642,15 +651,48 @@ async fn execute_once(
                 return Ok(response);
             }
 
-            if let Some(RetryAdvice { wait, reason }) = parse_retry_after(resp.headers()) {
+            if let Some(retry) = parse_retry_after(&headers) {
+                let rate_info = parse_rate_limit(&headers);
+                warn!(
+                    status = %status,
+                    request = %request.key(),
+                    budget = ?budget,
+                    priority = %request.priority.as_str(),
+                    github_request_id = headers
+                        .get("x-github-request-id")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("-"),
+                    retry_after_seconds = retry.wait.as_secs(),
+                    rate_limit_remaining = rate_info.as_ref().map(|data| data.remaining),
+                    rate_limit_reset = rate_info
+                        .as_ref()
+                        .map(|data| data.reset.timestamp()),
+                    "GitHub responded with retryable status"
+                );
                 metrics::SLEEP_SECONDS
-                    .with_label_values(&[budget_label(budget), reason])
-                    .inc_by(wait.as_secs());
-                sleep(wait + Duration::from_secs(1)).await;
+                    .with_label_values(&[budget_label(budget), retry.reason])
+                    .inc_by(retry.wait.as_secs());
+                sleep(retry.wait + Duration::from_secs(1)).await;
                 return Err(anyhow::anyhow!("retry after"));
             }
 
             if status == StatusCode::FORBIDDEN || status == StatusCode::TOO_MANY_REQUESTS {
+                let rate_info = parse_rate_limit(&headers);
+                warn!(
+                    status = %status,
+                    request = %request.key(),
+                    budget = ?budget,
+                    priority = %request.priority.as_str(),
+                    github_request_id = headers
+                        .get("x-github-request-id")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("-"),
+                    rate_limit_remaining = rate_info.as_ref().map(|data| data.remaining),
+                    rate_limit_reset = rate_info
+                        .as_ref()
+                        .map(|data| data.reset.timestamp()),
+                    "GitHub returned secondary rate limit response"
+                );
                 metrics::SLEEP_SECONDS
                     .with_label_values(&[budget_label(budget), "secondary_limit"])
                     .inc_by(3);
@@ -658,10 +700,49 @@ async fn execute_once(
                 return Err(anyhow::anyhow!("secondary rate limit"));
             }
 
+            let rate_info = parse_rate_limit(&headers);
+            let request_id = headers
+                .get("x-github-request-id")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("-");
+            let body_snapshot = resp.body().clone();
+            let body_preview = body_preview(&body_snapshot);
+            warn!(
+                status = %status,
+                request = %request.key(),
+                budget = ?budget,
+                priority = %request.priority.as_str(),
+                github_request_id = request_id,
+                rate_limit_remaining = rate_info.as_ref().map(|data| data.remaining),
+                rate_limit_reset = rate_info
+                    .as_ref()
+                    .map(|data| data.reset.timestamp()),
+                body_preview = %body_preview,
+                "GitHub returned error response"
+            );
             Err(HttpStatusError::new(status).into())
         }
         Err(err) => Err(err),
     }
+}
+
+fn body_preview(body: &[u8]) -> String {
+    if body.is_empty() {
+        return String::new();
+    }
+    let text = String::from_utf8_lossy(body);
+    truncate_str(&text, 256)
+}
+
+fn truncate_str(value: &str, limit: usize) -> String {
+    if value.is_empty() {
+        return String::new();
+    }
+    let mut truncated: String = value.chars().take(limit).collect();
+    if truncated.len() < value.len() {
+        truncated.push('…');
+    }
+    truncated
 }
 
 fn extract_graphql_cost(response: &BrokerResponse) -> Option<u64> {

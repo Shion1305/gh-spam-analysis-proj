@@ -7,7 +7,7 @@ use gh_broker::{GithubBroker, HttpStatusError, Priority};
 use http::{header, Request, StatusCode};
 use serde_json::Value;
 use thiserror::Error;
-use tracing::instrument;
+use tracing::{debug, instrument};
 use url::Url;
 
 #[derive(Debug, Error)]
@@ -79,6 +79,13 @@ impl BrokerGithubClient {
 
     async fn get_json(&self, url: Url, priority: Priority) -> Result<Value> {
         let endpoint = url.path().trim_start_matches('/').to_string();
+        let full_url = url.as_str().to_string();
+        debug!(
+            endpoint = %endpoint,
+            url = %full_url,
+            priority = %priority.as_str(),
+            "Dispatching GitHub request"
+        );
         let response = match self.execute(url, priority).await {
             Ok(resp) => resp,
             Err(err) => {

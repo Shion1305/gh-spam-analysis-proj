@@ -25,6 +25,7 @@ use tracing::{info, instrument, warn};
 use crate::client::{GithubApiError, GithubClient};
 use crate::metrics::{self, ActiveRepoGuard};
 use common::config::CollectorConfig;
+use gh_broker::HttpStatusError;
 
 #[derive(Debug, Deserialize)]
 pub struct SeedRepo {
@@ -185,20 +186,48 @@ impl<C: GithubClient + 'static> Collector<C> {
                         .with_label_values(&["error"])
                         .observe(repo_started.elapsed().as_secs_f64());
 
+                    let error_details = extract_error_details(&err);
+
                     // Determine if this is a permanent error or a transient failure
                     let status = if is_permanent_error(&err) {
                         warn!(
+                            job_id = job.id,
                             owner = %seed.owner,
                             repo = %seed.name,
                             error = ?err,
+                            attempt = job.failure_count + 1,
+                            status_code = error_details
+                                .status
+                                .map(|status| status.as_u16()),
+                            endpoint = error_details
+                                .endpoint
+                                .as_deref()
+                                .unwrap_or("-"),
+                            context = error_details
+                                .context
+                                .as_deref()
+                                .unwrap_or("-"),
                             "permanent error - will not retry"
                         );
                         CollectionStatus::Error
                     } else {
                         warn!(
+                            job_id = job.id,
                             owner = %seed.owner,
                             repo = %seed.name,
                             error = ?err,
+                            attempt = job.failure_count + 1,
+                            status_code = error_details
+                                .status
+                                .map(|status| status.as_u16()),
+                            endpoint = error_details
+                                .endpoint
+                                .as_deref()
+                                .unwrap_or("-"),
+                            context = error_details
+                                .context
+                                .as_deref()
+                                .unwrap_or("-"),
                             "transient failure - will retry"
                         );
                         CollectionStatus::Failed
@@ -277,6 +306,10 @@ impl<C: GithubClient + 'static> Collector<C> {
         Ok(())
     }
 
+    #[instrument(
+        skip(self, session_counts, dedupe_counts),
+        fields(owner = %seed.owner, repo = %seed.name, page_size = self.config.page_size)
+    )]
     async fn process_repo(
         &self,
         seed: &SeedRepo,
@@ -406,6 +439,14 @@ impl<C: GithubClient + 'static> Collector<C> {
         Ok(())
     }
 
+    #[instrument(
+        skip(self, ctx),
+        fields(
+            repo = ctx.repo_full_name,
+            issue_number = issue.number,
+            page_size = self.config.page_size
+        )
+    )]
     async fn process_comments(
         &self,
         issue: &IssueRow,
@@ -607,6 +648,54 @@ fn is_permanent_error(err: &anyhow::Error) -> bool {
         return is_repo_fetch;
     }
     error_msg.contains("403") || error_msg.contains("451") || error_msg.contains("410")
+}
+
+#[derive(Default)]
+struct ErrorDetails {
+    status: Option<StatusCode>,
+    endpoint: Option<String>,
+    context: Option<String>,
+}
+
+fn extract_error_details(err: &anyhow::Error) -> ErrorDetails {
+    let mut details = ErrorDetails::default();
+
+    for cause in err.chain() {
+        if details.status.is_none() {
+            if let Some(api_err) = cause.downcast_ref::<GithubApiError>() {
+                details.status = Some(api_err.status_code());
+                details.endpoint = Some(api_err.endpoint().to_string());
+            }
+        }
+
+        if details.status.is_none() {
+            if let Some(http_err) = cause.downcast_ref::<HttpStatusError>() {
+                details.status = Some(http_err.status);
+            }
+        }
+
+        if details.context.is_none() {
+            let context = cause.to_string();
+            details.context = Some(truncate_context(&context));
+        }
+    }
+
+    if details.context.is_none() {
+        details.context = Some(truncate_context(&err.to_string()));
+    }
+
+    details
+}
+
+fn truncate_context(value: &str) -> String {
+    if value.is_empty() {
+        return String::new();
+    }
+    let mut truncated: String = value.chars().take(256).collect();
+    if truncated.len() < value.len() {
+        truncated.push('…');
+    }
+    truncated
 }
 
 #[cfg(test)]
