@@ -1,7 +1,8 @@
 use once_cell::sync::Lazy;
 use prometheus::{
     register_histogram, register_histogram_vec, register_int_counter, register_int_counter_vec,
-    register_int_gauge, Histogram, HistogramVec, IntCounter, IntCounterVec, IntGauge,
+    register_int_gauge, register_int_gauge_vec, Histogram, HistogramVec, IntCounter, IntCounterVec,
+    IntGauge, IntGaugeVec,
 };
 
 pub static RUNS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
@@ -120,6 +121,51 @@ pub static REPO_DURATION: Lazy<HistogramVec> = Lazy::new(|| {
         vec![0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0]
     )
     .expect("collector repository duration histogram")
+});
+
+pub static REPO_JOB_STATUS: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "collector_repository_job_status",
+        "Current status of collection jobs per repository (1=pending, 2=in_progress, 3=completed, 4=failed)",
+        &["repo", "status"]
+    )
+    .expect("collector repository job status")
+});
+
+pub static REPO_JOB_FAILURE_COUNT: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "collector_repository_job_failure_count",
+        "Number of consecutive failures for a repository collection job",
+        &["repo"]
+    )
+    .expect("collector repository job failure count")
+});
+
+pub static REPO_JOB_PRIORITY: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "collector_repository_job_priority",
+        "Priority of the repository collection job",
+        &["repo"]
+    )
+    .expect("collector repository job priority")
+});
+
+pub static REPO_LAST_ATTEMPT_TIMESTAMP: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "collector_repository_last_attempt_timestamp_seconds",
+        "Unix timestamp of the last collection attempt for a repository",
+        &["repo"]
+    )
+    .expect("collector repository last attempt timestamp")
+});
+
+pub static REPO_LAST_SUCCESS_TIMESTAMP: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "collector_repository_last_success_timestamp_seconds",
+        "Unix timestamp of the last successful collection for a repository",
+        &["repo"]
+    )
+    .expect("collector repository last success timestamp")
 });
 
 pub struct ActiveRepoGuard;

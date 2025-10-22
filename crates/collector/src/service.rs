@@ -100,6 +100,20 @@ impl<C: GithubClient + 'static> Collector<C> {
                 continue;
             }
 
+            // Update metrics for in_progress status
+            metrics::REPO_JOB_STATUS
+                .with_label_values(&[&job.full_name, "in_progress"])
+                .set(1);
+            metrics::REPO_JOB_STATUS
+                .with_label_values(&[&job.full_name, "pending"])
+                .set(0);
+            metrics::REPO_JOB_PRIORITY
+                .with_label_values(&[&job.full_name])
+                .set(job.priority as i64);
+            metrics::REPO_LAST_ATTEMPT_TIMESTAMP
+                .with_label_values(&[&job.full_name])
+                .set(Utc::now().timestamp());
+
             let repo_started = Instant::now();
             let seed = SeedRepo {
                 owner: job.owner.clone(),
@@ -135,6 +149,26 @@ impl<C: GithubClient + 'static> Collector<C> {
                         .await
                     {
                         warn!(job_id = job.id, error = ?err, "failed to mark job as completed");
+                    } else {
+                        // Update metrics for successful completion
+                        metrics::REPO_JOB_STATUS
+                            .with_label_values(&[&job.full_name, "completed"])
+                            .set(1);
+                        metrics::REPO_JOB_STATUS
+                            .with_label_values(&[&job.full_name, "pending"])
+                            .set(0);
+                        metrics::REPO_JOB_STATUS
+                            .with_label_values(&[&job.full_name, "in_progress"])
+                            .set(0);
+                        metrics::REPO_JOB_STATUS
+                            .with_label_values(&[&job.full_name, "failed"])
+                            .set(0);
+                        metrics::REPO_JOB_FAILURE_COUNT
+                            .with_label_values(&[&job.full_name])
+                            .set(0);
+                        metrics::REPO_LAST_SUCCESS_TIMESTAMP
+                            .with_label_values(&[&job.full_name])
+                            .set(Utc::now().timestamp());
                     }
                 }
                 Err(err) => {
@@ -167,6 +201,23 @@ impl<C: GithubClient + 'static> Collector<C> {
                         .await
                     {
                         warn!(job_id = job.id, error = ?update_err, "failed to mark job as failed");
+                    } else {
+                        // Update metrics for failed job (returns to pending)
+                        metrics::REPO_JOB_STATUS
+                            .with_label_values(&[&job.full_name, "pending"])
+                            .set(1);
+                        metrics::REPO_JOB_STATUS
+                            .with_label_values(&[&job.full_name, "completed"])
+                            .set(0);
+                        metrics::REPO_JOB_STATUS
+                            .with_label_values(&[&job.full_name, "in_progress"])
+                            .set(0);
+                        metrics::REPO_JOB_STATUS
+                            .with_label_values(&[&job.full_name, "failed"])
+                            .set(1);
+                        metrics::REPO_JOB_FAILURE_COUNT
+                            .with_label_values(&[&job.full_name])
+                            .set((job.failure_count + 1) as i64);
                     }
                 }
             }
