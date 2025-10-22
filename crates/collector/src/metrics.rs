@@ -122,6 +122,12 @@ pub static REPO_DURATION: Lazy<HistogramVec> = Lazy::new(|| {
 
 pub struct ActiveRepoGuard;
 
+impl Default for ActiveRepoGuard {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ActiveRepoGuard {
     pub fn new() -> Self {
         ACTIVE_REPOS.inc();

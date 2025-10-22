@@ -8,12 +8,13 @@ use tracing::{instrument, warn};
 
 use crate::errors::{DbError, Result};
 use crate::models::{
-    ActorSpamSummary, CollectorWatermarkRow, CommentRow, IssueQuery, IssueRow, RepositoryRow,
-    SpamFlagRow, SpamFlagUpsert, UserRow, WatermarkUpdate,
+    ActorSpamSummary, CollectionJobCreate, CollectionJobRow, CollectionJobUpdate, CollectionStatus,
+    CollectorWatermarkRow, CommentRow, IssueQuery, IssueRow, RepositoryRow, SpamFlagRow,
+    SpamFlagUpsert, UserRow, WatermarkUpdate,
 };
 use crate::repositories::{
-    CommentRepository, IssueRepository, RepoRepository, Repositories, SpamFlagsRepository,
-    UserRepository, WatermarkRepository,
+    CollectionJobRepository, CommentRepository, IssueRepository, RepoRepository, Repositories,
+    SpamFlagsRepository, UserRepository, WatermarkRepository,
 };
 
 pub async fn run_migrations(pool: &PgPool) -> Result<()> {
@@ -32,6 +33,7 @@ pub struct PgDatabase {
     comment_repo: Arc<PgCommentRepository>,
     watermark_repo: Arc<PgWatermarkRepository>,
     spam_repo: Arc<PgSpamFlagsRepository>,
+    collection_job_repo: Arc<PgCollectionJobRepository>,
 }
 
 impl PgDatabase {
@@ -77,6 +79,7 @@ impl PgDatabase {
         let comment_repo = Arc::new(PgCommentRepository { pool: pool.clone() });
         let watermark_repo = Arc::new(PgWatermarkRepository { pool: pool.clone() });
         let spam_repo = Arc::new(PgSpamFlagsRepository { pool: pool.clone() });
+        let collection_job_repo = Arc::new(PgCollectionJobRepository { pool: pool.clone() });
 
         Self {
             pool,
@@ -86,6 +89,7 @@ impl PgDatabase {
             comment_repo,
             watermark_repo,
             spam_repo,
+            collection_job_repo,
         }
     }
 
@@ -117,6 +121,10 @@ impl Repositories for PgDatabase {
 
     fn spam_flags(&self) -> &dyn SpamFlagsRepository {
         &*self.spam_repo
+    }
+
+    fn collection_jobs(&self) -> &dyn CollectionJobRepository {
+        &*self.collection_job_repo
     }
 }
 
@@ -588,5 +596,142 @@ impl SpamFlagsRepository for PgSpamFlagsRepository {
             }
         }
         Ok(summaries)
+    }
+}
+
+#[derive(Clone)]
+struct PgCollectionJobRepository {
+    pool: PgPool,
+}
+
+#[async_trait]
+impl CollectionJobRepository for PgCollectionJobRepository {
+    async fn create(&self, job: CollectionJobCreate) -> Result<CollectionJobRow> {
+        sqlx::query_as::<_, CollectionJobRow>(
+            r#"
+            INSERT INTO collection_jobs (owner, name, priority)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (owner, name) DO UPDATE
+                SET priority = EXCLUDED.priority,
+                    updated_at = now()
+            RETURNING id, owner, name, full_name, status as "status: _", priority, 
+                      last_attempt_at, last_completed_at, failure_count, error_message,
+                      created_at, updated_at
+            "#,
+        )
+        .bind(job.owner)
+        .bind(job.name)
+        .bind(job.priority)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(DbError::Query)
+    }
+
+    async fn get_pending(&self, limit: i32) -> Result<Vec<CollectionJobRow>> {
+        sqlx::query_as::<_, CollectionJobRow>(
+            r#"
+            SELECT id, owner, name, full_name, status as "status: _", priority,
+                   last_attempt_at, last_completed_at, failure_count, error_message,
+                   created_at, updated_at
+            FROM collection_jobs
+            WHERE status = 'pending'
+            ORDER BY priority DESC, created_at ASC
+            LIMIT $1
+            "#,
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(DbError::Query)
+    }
+
+    async fn mark_in_progress(&self, id: i64) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE collection_jobs
+            SET status = 'in_progress',
+                last_attempt_at = now(),
+                updated_at = now()
+            WHERE id = $1
+            "#,
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(DbError::Query)
+    }
+
+    async fn update(&self, update: CollectionJobUpdate) -> Result<()> {
+        let status_change = match update.status {
+            CollectionStatus::Completed => {
+                sqlx::query(
+                    r#"
+                    UPDATE collection_jobs
+                    SET status = $1,
+                        last_completed_at = now(),
+                        error_message = NULL,
+                        failure_count = 0,
+                        updated_at = now()
+                    WHERE id = $2
+                    "#,
+                )
+                .bind(update.status)
+                .bind(update.id)
+                .execute(&self.pool)
+                .await
+            }
+            CollectionStatus::Failed => {
+                sqlx::query(
+                    r#"
+                    UPDATE collection_jobs
+                    SET status = 'pending',
+                        error_message = $1,
+                        failure_count = failure_count + 1,
+                        updated_at = now()
+                    WHERE id = $2
+                    "#,
+                )
+                .bind(update.error_message)
+                .bind(update.id)
+                .execute(&self.pool)
+                .await
+            }
+            _ => {
+                sqlx::query(
+                    r#"
+                    UPDATE collection_jobs
+                    SET status = $1,
+                        error_message = $2,
+                        updated_at = now()
+                    WHERE id = $3
+                    "#,
+                )
+                .bind(update.status)
+                .bind(update.error_message)
+                .bind(update.id)
+                .execute(&self.pool)
+                .await
+            }
+        };
+
+        status_change.map(|_| ()).map_err(DbError::Query)
+    }
+
+    async fn list(&self, limit: i32) -> Result<Vec<CollectionJobRow>> {
+        sqlx::query_as::<_, CollectionJobRow>(
+            r#"
+            SELECT id, owner, name, full_name, status as "status: _", priority,
+                   last_attempt_at, last_completed_at, failure_count, error_message,
+                   created_at, updated_at
+            FROM collection_jobs
+            ORDER BY updated_at DESC
+            LIMIT $1
+            "#,
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(DbError::Query)
     }
 }

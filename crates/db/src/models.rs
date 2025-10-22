@@ -2,6 +2,15 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, PartialEq, Eq)]
+#[sqlx(type_name = "collection_status", rename_all = "snake_case")]
+pub enum CollectionStatus {
+    Pending,
+    InProgress,
+    Completed,
+    Failed,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct RepositoryRow {
     pub id: i64,
@@ -122,4 +131,34 @@ pub struct ActorSpamSummary {
     pub total_score: f32,
     pub flag_count: i64,
     pub reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct CollectionJobRow {
+    pub id: i64,
+    pub owner: String,
+    pub name: String,
+    pub full_name: String,
+    pub status: CollectionStatus,
+    pub priority: i32,
+    pub last_attempt_at: Option<DateTime<Utc>>,
+    pub last_completed_at: Option<DateTime<Utc>>,
+    pub failure_count: i32,
+    pub error_message: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CollectionJobCreate {
+    pub owner: String,
+    pub name: String,
+    pub priority: i32,
+}
+
+#[derive(Debug, Clone)]
+pub struct CollectionJobUpdate {
+    pub id: i64,
+    pub status: CollectionStatus,
+    pub error_message: Option<String>,
 }

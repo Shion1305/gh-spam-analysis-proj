@@ -3,8 +3,9 @@ use chrono::{DateTime, Utc};
 
 use crate::errors::Result;
 use crate::models::{
-    ActorSpamSummary, CollectorWatermarkRow, CommentRow, IssueQuery, IssueRow, RepositoryRow,
-    SpamFlagRow, SpamFlagUpsert, UserRow, WatermarkUpdate,
+    ActorSpamSummary, CollectionJobCreate, CollectionJobRow, CollectionJobUpdate,
+    CollectorWatermarkRow, CommentRow, IssueQuery, IssueRow, RepositoryRow, SpamFlagRow,
+    SpamFlagUpsert, UserRow, WatermarkUpdate,
 };
 
 #[async_trait]
@@ -59,6 +60,15 @@ pub trait SpamFlagsRepository: Send + Sync {
     ) -> Result<Vec<ActorSpamSummary>>;
 }
 
+#[async_trait]
+pub trait CollectionJobRepository: Send + Sync {
+    async fn create(&self, job: CollectionJobCreate) -> Result<CollectionJobRow>;
+    async fn get_pending(&self, limit: i32) -> Result<Vec<CollectionJobRow>>;
+    async fn mark_in_progress(&self, id: i64) -> Result<()>;
+    async fn update(&self, update: CollectionJobUpdate) -> Result<()>;
+    async fn list(&self, limit: i32) -> Result<Vec<CollectionJobRow>>;
+}
+
 pub trait Repositories: Send + Sync {
     fn repos(&self) -> &dyn RepoRepository;
     fn users(&self) -> &dyn UserRepository;
@@ -66,4 +76,5 @@ pub trait Repositories: Send + Sync {
     fn comments(&self) -> &dyn CommentRepository;
     fn watermarks(&self) -> &dyn WatermarkRepository;
     fn spam_flags(&self) -> &dyn SpamFlagsRepository;
+    fn collection_jobs(&self) -> &dyn CollectionJobRepository;
 }
