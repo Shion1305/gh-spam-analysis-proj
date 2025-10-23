@@ -69,7 +69,7 @@ github-spam-lab/
    ```
 
    Configuration is loaded from `config/default.toml` or `config/local.toml` files, or via environment variables with `__` separator (e.g., `DATABASE__URL`, `API__BIND`).
-   The collector no longer uses `seed_repos_path`; repositories are enqueued via collection jobs.
+   The collector no longer uses `seed_repos_path`; repositories are enqueued via collection jobs. See `docs/hybrid.md` for the hybrid fetch strategy (GraphQL + REST).
 
 3. **Run components**
    ```bash
@@ -77,6 +77,7 @@ github-spam-lab/
    # export GITHUB__TOKEN_IDS="token1"
    # export GITHUB__TOKEN_SECRETS="ghp_xxxxx"
    just dev-collector           # collector connects to Postgres, runs migrations, and starts ingesting
+   # Tune parallel repo processing (default 4): COLLECTOR__MAX_CONCURRENT_REPOS=8 just dev-collector
    just dev-api                 # API auto-runs migrations before serving (default bind: 0.0.0.0:3000)
    just obs-up                  # (optional) spin up Prometheus + Grafana stack
 
@@ -170,11 +171,13 @@ github-spam-lab/
   - Broker per-token and aggregated capacities by budget (REST/Core vs GraphQL):
     - `gh_broker_rate_limit{token,budget}`, `gh_broker_rate_remaining{token,budget}`
     - `gh_broker_budget_limit_total{budget}`, `gh_broker_budget_remaining_total{budget}`
+    - `gh_broker_pending_requests{budget,priority}` (queued + in-flight)
   - Fetcher metrics split by backend and operation:
     - `collector_fetch_requests_total{fetcher,op,outcome}`
     - `collector_fetch_items_total{fetcher,op}`
     - `collector_fetch_latency_seconds_bucket{fetcher,op}`
   - Collector run/job gauges and histograms (runs, in-progress repos, last success/attempt, P95 repo duration, throughput).
+  - Database entity counts by repository: `db_issues_total_by_repo`, `db_comments_total_by_repo`, `db_users_total_by_repo`.
 - Docker compose stack under `docker/obs/` bundles Prometheus + Grafana with a dashboard covering:
   - REST vs GraphQL budget remaining and utilization
   - Queue lengths by priority; request rate/error/retries; P95 latency; cache hit ratio

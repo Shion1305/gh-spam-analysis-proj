@@ -122,6 +122,17 @@
     },
     {
       "type": "timeseries",
+      "title": "Broker Pending Requests (queued+inflight)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        {
+          "expr": "sum by (budget, priority) (gh_broker_pending_requests{budget=~\"$budget\"})",
+          "legendFormat": "{{budget}}/{{priority}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
       "title": "Broker Queue Length",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
       "targets": [
