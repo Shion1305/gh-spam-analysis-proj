@@ -616,6 +616,15 @@ async fn execute_once(
                 metrics::RATE_REMAINING
                     .with_label_values(&[&token.id, budget_label(budget)])
                     .set(update.remaining);
+
+                // Update aggregated capacity gauges per budget
+                let (limit_sum, remaining_sum) = inner.token_pool.totals(budget).await;
+                metrics::BUDGET_LIMIT_TOTAL
+                    .with_label_values(&[budget_label(budget)])
+                    .set(limit_sum);
+                metrics::BUDGET_REMAINING_TOTAL
+                    .with_label_values(&[budget_label(budget)])
+                    .set(remaining_sum);
             }
 
             if status == StatusCode::NOT_MODIFIED {
@@ -661,6 +670,15 @@ async fn execute_once(
                     .token_pool
                     .consume(budget, &token.id, cost as i64)
                     .await;
+
+                // Refresh aggregated capacity after consumption (handles cases with missing headers)
+                let (limit_sum, remaining_sum) = inner.token_pool.totals(budget).await;
+                metrics::BUDGET_LIMIT_TOTAL
+                    .with_label_values(&[budget_label(budget)])
+                    .set(limit_sum);
+                metrics::BUDGET_REMAINING_TOTAL
+                    .with_label_values(&[budget_label(budget)])
+                    .set(remaining_sum);
 
                 return Ok(response);
             }

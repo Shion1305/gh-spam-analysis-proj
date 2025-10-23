@@ -49,6 +49,25 @@ pub static RATE_LIMIT: Lazy<IntGaugeVec> = Lazy::new(|| {
     .expect("rate limit")
 });
 
+// Aggregated capacity across all tokens per budget (e.g., REST/Core vs GraphQL)
+pub static BUDGET_LIMIT_TOTAL: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "gh_broker_budget_limit_total",
+        "Total rate limit across all tokens per budget",
+        &["budget"]
+    )
+    .expect("budget limit total")
+});
+
+pub static BUDGET_REMAINING_TOTAL: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "gh_broker_budget_remaining_total",
+        "Total remaining capacity across all tokens per budget",
+        &["budget"]
+    )
+    .expect("budget remaining total")
+});
+
 pub static SLEEP_SECONDS: Lazy<IntCounterVec> = Lazy::new(|| {
     register_int_counter_vec!(
         "gh_broker_sleep_seconds_total",
