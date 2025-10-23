@@ -3,18 +3,14 @@ use std::sync::Arc;
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::Utc;
-use collector::fetcher::{
-    CommentPage, CommentRecord, DataFetcher, IssuePage, IssueRecord, RepoSnapshot, UserFetch,
-};
+use collector::fetcher::{CommentPage, DataFetcher, IssuePage, RepoSnapshot, UserFetch};
 use collector::service::Collector;
 use common::config::{CollectorConfig, FetchMode};
 use db::models::{CollectionJobCreate, CollectionJobUpdate, CollectionStatus};
 use db::pg::PgDatabase;
 use db::Repositories;
 use db_test_fixture::DbFixture;
-use normalizer::models::{
-    NormalizedComment, NormalizedIssue, NormalizedRepository, NormalizedUser,
-};
+use normalizer::models::NormalizedRepository;
 use normalizer::payloads::UserRef;
 use serde_json::json;
 

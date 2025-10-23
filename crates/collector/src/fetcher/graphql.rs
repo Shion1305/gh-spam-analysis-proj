@@ -386,10 +386,7 @@ impl GraphqlDataFetcher {
                     node.get("updatedAt")
                         .and_then(|v| if v.is_null() { None } else { v.as_str() });
 
-                let user_value = actor_info
-                    .user_ref
-                    .as_ref()
-                    .map(|user| user_ref_to_value(user));
+                let user_value = actor_info.user_ref.as_ref().map(user_ref_to_value);
                 let comment_value = json!({
                     "id": comment_id,
                     "user": user_value,
@@ -624,10 +621,7 @@ impl DataFetcher for GraphqlDataFetcher {
                 } else {
                     None
                 };
-                let user_value = actor_info
-                    .user_ref
-                    .as_ref()
-                    .map(|user| user_ref_to_value(user));
+                let user_value = actor_info.user_ref.as_ref().map(user_ref_to_value);
                 let issue_value = json!({
                     "id": issue_id,
                     "number": issue_number,
@@ -701,7 +695,7 @@ impl DataFetcher for GraphqlDataFetcher {
                 json!({
                     "owner": owner,
                     "name": name,
-                    "number": issue_number as i64,
+                    "number": issue_number,
                     "perPage": per_page as i64,
                     "cursor": cursor,
                 }),
