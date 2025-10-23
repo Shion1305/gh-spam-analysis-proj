@@ -88,6 +88,8 @@ github-spam-lab/
    #   - API service (http://localhost:3000)
    #   - Collector service
    # The collector requires GitHub REST tokens (`GITHUB__TOKEN_IDS` / `GITHUB__TOKEN_SECRETS`).
+   # By default, requests use a generic, privacy-friendly User-Agent ("generic-http-client").
+   # You can override it (optionally) via env: `GITHUB__USER_AGENT="your-app/1.0"`.
    # Edit docker/.env (auto-created from docker/.env.example) before running `just up`
    # or adjust the compose environment to disable the collector if you only need the API locally.
    ```
