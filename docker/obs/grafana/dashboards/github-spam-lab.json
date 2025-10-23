@@ -60,6 +60,30 @@
   },
   "panels": [
     {
+      "type": "timeseries",
+      "title": "DB Issues by Repo",
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
+      "targets": [
+        { "expr": "db_issues_total_by_repo{repo=~\"$repo\"}", "legendFormat": "{{repo}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "DB Comments by Repo",
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 0 },
+      "targets": [
+        { "expr": "db_comments_total_by_repo{repo=~\"$repo\"}", "legendFormat": "{{repo}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "DB Users by Repo",
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
+      "targets": [
+        { "expr": "db_users_total_by_repo{repo=~\"$repo\"}", "legendFormat": "{{repo}}" }
+      ]
+    },
+    {
       "type": "stat",
       "title": "Active Repositories",
       "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },

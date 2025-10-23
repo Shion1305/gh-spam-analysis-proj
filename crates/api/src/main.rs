@@ -19,6 +19,7 @@ async fn main() -> Result<()> {
     let state = Arc::new(ApiState {
         repositories,
         metrics_path,
+        pool: Arc::new(database.pool().clone()),
     });
     let app: Router = build_router(state);
 

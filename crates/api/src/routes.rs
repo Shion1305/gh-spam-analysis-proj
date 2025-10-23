@@ -7,9 +7,11 @@ use axum::{Json, Router};
 use chrono::{DateTime, NaiveDate, Utc};
 use db::models::{CollectionJobCreate, IssueQuery, SpamFilter};
 use db::Repositories;
-use prometheus::Encoder;
+use once_cell::sync::Lazy;
+use prometheus::{register_int_gauge_vec, Encoder, IntGaugeVec};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sqlx::PgPool;
 use tracing::instrument;
 
 use crate::dto::{summarise_flags, IssueDto, RepoDto, SpammyUserDto, UserDto};
@@ -19,6 +21,7 @@ use crate::error::{ApiError, ApiResult};
 pub struct ApiState {
     pub repositories: Arc<dyn Repositories>,
     pub metrics_path: &'static str,
+    pub pool: Arc<PgPool>,
 }
 
 pub fn build_router(state: Arc<ApiState>) -> Router {
@@ -32,6 +35,109 @@ pub fn build_router(state: Arc<ApiState>) -> Router {
         .route("/top/spammy-users", get(top_spammy_users))
         .route(metrics_path, get(metrics))
         .with_state(state)
+}
+
+static ISSUES_BY_REPO: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "db_issues_total_by_repo",
+        "Number of issues stored per repository",
+        &["repo"]
+    )
+    .expect("issues_by_repo gauge")
+});
+
+static COMMENTS_BY_REPO: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "db_comments_total_by_repo",
+        "Number of comments stored per repository",
+        &["repo"]
+    )
+    .expect("comments_by_repo gauge")
+});
+
+static USERS_BY_REPO: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "db_users_total_by_repo",
+        "Number of distinct users participating (issues + comments) per repository",
+        &["repo"]
+    )
+    .expect("users_by_repo gauge")
+});
+
+async fn refresh_repo_entity_counts(pool: &PgPool) -> Result<(), String> {
+    // Issues per repo
+    let issues = sqlx::query!(
+        r#"
+        SELECT r.full_name as repo, COUNT(*)::BIGINT as count
+        FROM issues i
+        JOIN repositories r ON r.id = i.repo_id
+        GROUP BY r.full_name
+        "#
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    for row in &issues {
+        let repo: &str = &row.repo;
+        let cnt = row.count.unwrap_or(0);
+        ISSUES_BY_REPO.with_label_values(&[repo]).set(cnt);
+    }
+
+    // Comments per repo
+    let comments = sqlx::query!(
+        r#"
+        SELECT r.full_name as repo, COUNT(*)::BIGINT as count
+        FROM comments c
+        JOIN issues i ON i.id = c.issue_id
+        JOIN repositories r ON r.id = i.repo_id
+        GROUP BY r.full_name
+        "#
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    for row in &comments {
+        let repo: &str = &row.repo;
+        let cnt = row.count.unwrap_or(0);
+        COMMENTS_BY_REPO.with_label_values(&[repo]).set(cnt);
+    }
+
+    // Distinct users (issue authors + comment authors) per repo
+    let users = sqlx::query!(
+        r#"
+        WITH iu AS (
+            SELECT r.full_name as repo, i.user_id as uid
+            FROM issues i
+            JOIN repositories r ON r.id = i.repo_id
+            WHERE i.user_id IS NOT NULL
+        ),
+        cu AS (
+            SELECT r.full_name as repo, c.user_id as uid
+            FROM comments c
+            JOIN issues i ON i.id = c.issue_id
+            JOIN repositories r ON r.id = i.repo_id
+            WHERE c.user_id IS NOT NULL
+        ),
+        allu AS (
+            SELECT repo, uid FROM iu
+            UNION ALL
+            SELECT repo, uid FROM cu
+        )
+        SELECT repo, COUNT(DISTINCT uid)::BIGINT AS count
+        FROM allu
+        GROUP BY repo
+        "#
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    for row in &users {
+        let repo = row.repo.as_deref().unwrap_or("");
+        let cnt = row.count.unwrap_or(0);
+        USERS_BY_REPO.with_label_values(&[repo]).set(cnt);
+    }
+
+    Ok(())
 }
 
 async fn healthz() -> impl IntoResponse {
@@ -129,8 +235,12 @@ async fn top_spammy_users(
     Ok(Json(rows.into_iter().map(SpammyUserDto::from).collect()))
 }
 
-#[instrument]
-async fn metrics() -> ApiResult<impl IntoResponse> {
+#[instrument(skip(state))]
+async fn metrics(State(state): State<Arc<ApiState>>) -> ApiResult<impl IntoResponse> {
+    // Best-effort: refresh counts before scraping metrics
+    if let Err(err) = refresh_repo_entity_counts(&state.pool).await {
+        tracing::warn!(error = %err, "failed to refresh repo entity counts");
+    }
     let encoder = prometheus::TextEncoder::new();
     let metric_families = prometheus::gather();
     let mut buffer = Vec::new();
