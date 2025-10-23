@@ -7,7 +7,7 @@ token_ids = ""
 token_secrets = ""
 
 [collector]
-interval_secs = 300
+interval_secs = 30
 page_size = 100
 run_once = false
 seed_repos_path = "scripts/seed_repos.json"
