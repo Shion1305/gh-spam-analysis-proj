@@ -26,3 +26,10 @@ axum.workspace = true
 once_cell.workspace = true
 prometheus.workspace = true
 thiserror.workspace = true
+base64.workspace = true
+
+[dev-dependencies]
+db_test_fixture = { path = "../db_test_fixture" }
+tokio = { workspace = true, features = ["macros", "rt"] }
+serde_json.workspace = true
+sqlx.workspace = true
