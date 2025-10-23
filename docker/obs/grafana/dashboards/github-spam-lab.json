@@ -3,13 +3,39 @@
   "title": "GitHub Spam Lab",
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
-  "refresh": "30s",
+  "version": 2,
+  "refresh": "15s",
   "panels": [
+    {
+      "type": "stat",
+      "title": "Active Repositories",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "targets": [ { "expr": "collector_active_repositories" } ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": false } }
+    },
+    {
+      "type": "stat",
+      "title": "Seed Repositories",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "targets": [ { "expr": "collector_seed_repositories" } ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": false } }
+    },
+    {
+      "type": "stat",
+      "title": "Runs (total/success/failure/errors)",
+      "gridPos": { "h": 4, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        { "expr": "collector_runs_total", "legendFormat": "total" },
+        { "expr": "collector_run_success_total", "legendFormat": "success" },
+        { "expr": "collector_run_failure_total", "legendFormat": "failure" },
+        { "expr": "collector_run_errors_total", "legendFormat": "errors" }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": false } }
+    },
     {
       "type": "timeseries",
       "title": "Broker Rate Remaining",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
       "targets": [
         {
           "expr": "gh_broker_rate_remaining",
@@ -20,7 +46,7 @@
     {
       "type": "timeseries",
       "title": "Broker Queue Length",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
       "targets": [
         {
           "expr": "gh_broker_queue_length",
@@ -31,7 +57,7 @@
     {
       "type": "timeseries",
       "title": "Broker Latency (P95)",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
       "targets": [
         {
           "expr": "histogram_quantile(0.95, sum(rate(gh_broker_latency_seconds_bucket[5m])) by (le, budget))",
@@ -42,7 +68,7 @@
     {
       "type": "timeseries",
       "title": "Broker Retry Count",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
       "targets": [
         {
           "expr": "rate(gh_broker_retries_total[5m])",
@@ -53,12 +79,120 @@
     {
       "type": "timeseries",
       "title": "Cache Hit Ratio",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
       "targets": [
         {
           "expr": "sum(rate(gh_broker_cache_hits_total[5m])) by (budget) / sum(rate(gh_broker_cache_hits_total[5m]) + rate(gh_broker_cache_misses_total[5m])) by (budget)",
           "legendFormat": "{{budget}}"
         }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Issues/sec by Repo",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "targets": [
+        {
+          "expr": "sum by (repo) (rate(collector_issues_processed_total[5m]))",
+          "legendFormat": "{{repo}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Comments/sec by Repo",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "targets": [
+        {
+          "expr": "sum by (repo) (rate(collector_comments_processed_total[5m]))",
+          "legendFormat": "{{repo}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Repo Processing Duration (P95)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(collector_repository_duration_seconds_bucket[5m])) by (le, outcome))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Jobs: Pending",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 36 },
+      "targets": [ { "expr": "sum(collector_repository_job_status{status=\"pending\"})" } ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": false } }
+    },
+    {
+      "type": "stat",
+      "title": "Jobs: In Progress",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 36 },
+      "targets": [ { "expr": "sum(collector_repository_job_status{status=\"in_progress\"})" } ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": false } }
+    },
+    {
+      "type": "stat",
+      "title": "Jobs: Completed",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 36 },
+      "targets": [ { "expr": "sum(collector_repository_job_status{status=\"completed\"})" } ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": false } }
+    },
+    {
+      "type": "stat",
+      "title": "Jobs: Failed",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 36 },
+      "targets": [ { "expr": "sum(collector_repository_job_status{status=\"failed\"})" } ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": false } }
+    },
+    {
+      "type": "stat",
+      "title": "Jobs: Error",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 36 },
+      "targets": [ { "expr": "sum(collector_repository_job_status{status=\"error\"})" } ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": false } }
+    },
+    {
+      "type": "bargauge",
+      "title": "In-Progress Repositories",
+      "gridPos": { "h": 8, "w": 8, "x": 20, "y": 36 },
+      "targets": [
+        { "expr": "collector_repository_job_status{status=\"in_progress\"}", "legendFormat": "{{repo}}" }
+      ]
+    },
+    {
+      "type": "bargauge",
+      "title": "Job Failures by Repo",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 40 },
+      "targets": [
+        { "expr": "collector_repository_job_failure_count", "legendFormat": "{{repo}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Last Attempt Age (minutes) by Repo",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 40 },
+      "targets": [
+        { "expr": "(time() - collector_repository_last_attempt_timestamp_seconds) / 60", "legendFormat": "{{repo}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Last Success Age (minutes) by Repo",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 48 },
+      "targets": [
+        { "expr": "(time() - collector_repository_last_success_timestamp_seconds) / 60", "legendFormat": "{{repo}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Users Fetched/sec",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 48 },
+      "targets": [
+        { "expr": "rate(collector_users_fetched_total[5m])" }
       ]
     }
   ]
