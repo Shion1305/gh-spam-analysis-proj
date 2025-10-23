@@ -33,6 +33,7 @@ services:
     environment:
       DATABASE__URL: postgres://postgres:postgres@postgres:5432/github_spam
       API__BIND: 0.0.0.0:3000
+      RUST_LOG: debug
     ports:
       - "3000:3000"
     volumes:
@@ -47,6 +48,7 @@ services:
     env_file: .env
     environment:
       DATABASE__URL: postgres://postgres:postgres@postgres:5432/github_spam
+      RUST_LOG: debug
     command: ["/usr/local/bin/collector"]
     ports:
       - "9091:9091"
@@ -70,8 +72,9 @@ services:
   grafana:
     image: grafana/grafana:10.2.0
     environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: 'true'
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: 'true'
     ports:
       - "3100:3000"
     volumes:
