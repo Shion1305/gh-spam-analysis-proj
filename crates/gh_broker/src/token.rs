@@ -141,6 +141,17 @@ impl TokenPool {
         }
     }
 
+    pub async fn get_numbers(&self, budget: Budget, token_id: &str) -> Option<(i64, i64)> {
+        let guard = self.inner.lock().await;
+        for token in guard.iter() {
+            if token.token.id == token_id {
+                let st = token.budgets.get(&budget)?;
+                return Some((st.limit, st.remaining));
+            }
+        }
+        None
+    }
+
     pub async fn totals(&self, budget: Budget) -> (i64, i64) {
         let guard = self.inner.lock().await;
         let mut limit_sum: i64 = 0;

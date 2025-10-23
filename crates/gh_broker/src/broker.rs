@@ -671,6 +671,17 @@ async fn execute_once(
                     .consume(budget, &token.id, cost as i64)
                     .await;
 
+                // Refresh per-token gauges after consumption (GraphQL cost may not include headers)
+                if let Some((limit, remaining)) = inner.token_pool.get_numbers(budget, &token.id).await
+                {
+                    metrics::RATE_LIMIT
+                        .with_label_values(&[&token.id, budget_label(budget)])
+                        .set(limit);
+                    metrics::RATE_REMAINING
+                        .with_label_values(&[&token.id, budget_label(budget)])
+                        .set(remaining);
+                }
+
                 // Refresh aggregated capacity after consumption (handles cases with missing headers)
                 let (limit_sum, remaining_sum) = inner.token_pool.totals(budget).await;
                 metrics::BUDGET_LIMIT_TOTAL
