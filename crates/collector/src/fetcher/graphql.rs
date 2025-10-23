@@ -65,7 +65,6 @@ query RepoIssues(
         createdAt
         updatedAt
         closedAt
-        isPullRequest
         author {
           __typename
           login
@@ -603,10 +602,6 @@ impl DataFetcher for GraphqlDataFetcher {
                 let closed_at =
                     node.get("closedAt")
                         .and_then(|v| if v.is_null() { None } else { v.as_str() });
-                let is_pull_request = node
-                    .get("isPullRequest")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
 
                 let comments_conn = node
                     .get("comments")
@@ -616,11 +611,9 @@ impl DataFetcher for GraphqlDataFetcher {
                     .and_then(Value::as_i64)
                     .unwrap_or(0);
 
-                let pull_request_value = if is_pull_request {
-                    Some(json!({}))
-                } else {
-                    None
-                };
+                // The `issues` connection only returns issues (not pull requests).
+                // For REST compatibility, the normalizer expects `pull_request: null` for issues.
+                let pull_request_value = None::<Value>;
                 let user_value = actor_info.user_ref.as_ref().map(user_ref_to_value);
                 let issue_value = json!({
                     "id": issue_id,
