@@ -98,11 +98,12 @@ check:
 # Tests
 
 test: test-db-up
-	if command -v cargo-nextest >/dev/null 2>&1; then \
-		TEST_ADMIN_URL='{{test_admin_url}}' DATABASE_URL='{{test_database_url}}' cargo nextest run --workspace; \
-	else \
-		TEST_ADMIN_URL='{{test_admin_url}}' DATABASE_URL='{{test_database_url}}' cargo test --workspace; \
-	fi
+    trap 'docker stop {{test_db_name}} >/dev/null 2>&1 || docker rm -f {{test_db_name}} >/dev/null 2>&1 || true' EXIT; \
+    if command -v cargo-nextest >/dev/null 2>&1; then \
+        TEST_ADMIN_URL='{{test_admin_url}}' DATABASE_URL='{{test_database_url}}' cargo nextest run --workspace; \
+    else \
+        TEST_ADMIN_URL='{{test_admin_url}}' DATABASE_URL='{{test_database_url}}' cargo test --workspace; \
+    fi
 
 test-unit: test-db-up
 	if command -v cargo-nextest >/dev/null 2>&1; then \
