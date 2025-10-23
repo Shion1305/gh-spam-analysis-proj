@@ -129,3 +129,7 @@ dev-api:
 
 ingest-once:
 	COLLECTOR_RUN_ONCE=true cargo run -p collector
+
+dump-logs-collector:
+  docker compose -f docker/docker-compose.yml logs --tail=200 --no-color collector | sed -e 's/\x1b\[[0-9;]*m//g'
+
