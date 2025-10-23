@@ -111,18 +111,14 @@ impl GithubClient for StubClient404 {
         unreachable!()
     }
     async fn get_user(&self, login: &str) -> Result<serde_json::Value> {
-        Err(GithubApiError::status(StatusCode::NOT_FOUND, format!("users/{login}"))
-            .into())
+        Err(GithubApiError::status(StatusCode::NOT_FOUND, format!("users/{login}")).into())
     }
 }
 
 #[tokio::test]
 async fn hybrid_fetcher_repo_uses_graphql() -> Result<()> {
-    let fetcher = GraphqlDataFetcher::new(
-        Arc::new(StubBroker),
-        Arc::new(StubClientFound),
-        "ua".into(),
-    );
+    let fetcher =
+        GraphqlDataFetcher::new(Arc::new(StubBroker), Arc::new(StubClientFound), "ua".into());
     let snapshot: RepoSnapshot = fetcher.fetch_repo("owner", "example").await?;
     assert_eq!(snapshot.repository.full_name, "owner/example");
     assert_eq!(snapshot.repository.id, 9999);
@@ -131,11 +127,8 @@ async fn hybrid_fetcher_repo_uses_graphql() -> Result<()> {
 
 #[tokio::test]
 async fn hybrid_fetcher_user_found_via_rest() -> Result<()> {
-    let fetcher = GraphqlDataFetcher::new(
-        Arc::new(StubBroker),
-        Arc::new(StubClientFound),
-        "ua".into(),
-    );
+    let fetcher =
+        GraphqlDataFetcher::new(Arc::new(StubBroker), Arc::new(StubClientFound), "ua".into());
     let user_ref = UserRef {
         id: 1234,
         login: "alice".to_string(),
@@ -151,11 +144,8 @@ async fn hybrid_fetcher_user_found_via_rest() -> Result<()> {
 
 #[tokio::test]
 async fn hybrid_fetcher_user_missing_on_404() -> Result<()> {
-    let fetcher = GraphqlDataFetcher::new(
-        Arc::new(StubBroker),
-        Arc::new(StubClient404),
-        "ua".into(),
-    );
+    let fetcher =
+        GraphqlDataFetcher::new(Arc::new(StubBroker), Arc::new(StubClient404), "ua".into());
     let user_ref = UserRef {
         id: 5678,
         login: "ghost".to_string(),
@@ -169,4 +159,3 @@ async fn hybrid_fetcher_user_missing_on_404() -> Result<()> {
         other => panic!("expected Missing, got {other:?}"),
     }
 }
-

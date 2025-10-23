@@ -21,7 +21,9 @@ enum Mode {
     Permanent,
 }
 
-struct StubFetcher { mode: Mode }
+struct StubFetcher {
+    mode: Mode,
+}
 
 #[async_trait]
 impl DataFetcher for StubFetcher {
@@ -56,7 +58,10 @@ impl DataFetcher for StubFetcher {
         _cursor: Option<String>,
         _per_page: u32,
     ) -> Result<IssuePage> {
-        Ok(IssuePage { items: vec![], next_cursor: None })
+        Ok(IssuePage {
+            items: vec![],
+            next_cursor: None,
+        })
     }
 
     async fn fetch_issue_comments(
@@ -68,16 +73,28 @@ impl DataFetcher for StubFetcher {
         _cursor: Option<String>,
         _per_page: u32,
     ) -> Result<CommentPage> {
-        Ok(CommentPage { items: vec![], next_cursor: None })
+        Ok(CommentPage {
+            items: vec![],
+            next_cursor: None,
+        })
     }
 
     async fn fetch_user(&self, _user: &UserRef) -> Result<UserFetch> {
-        Ok(UserFetch::Missing(collector::fetcher::MissingUser { id: 0, login: "ghost".into(), status: None }))
+        Ok(UserFetch::Missing(collector::fetcher::MissingUser {
+            id: 0,
+            login: "ghost".into(),
+            status: None,
+        }))
     }
 }
 
 fn cfg() -> CollectorConfig {
-    CollectorConfig { page_size: 50, interval_secs: 1, run_once: true, fetch_mode: FetchMode::Hybrid }
+    CollectorConfig {
+        page_size: 50,
+        interval_secs: 1,
+        run_once: true,
+        fetch_mode: FetchMode::Hybrid,
+    }
 }
 
 #[tokio::test]
@@ -95,7 +112,11 @@ async fn job_completes_on_success() -> Result<()> {
 
     let job = db
         .collection_jobs()
-        .create(CollectionJobCreate { owner: "o".into(), name: "r".into(), priority: 0 })
+        .create(CollectionJobCreate {
+            owner: "o".into(),
+            name: "r".into(),
+            priority: 0,
+        })
         .await?;
 
     let fetcher: Arc<dyn DataFetcher> = Arc::new(StubFetcher { mode: Mode::Ok });
@@ -125,10 +146,16 @@ async fn job_retries_on_transient_error() -> Result<()> {
 
     let job = db
         .collection_jobs()
-        .create(CollectionJobCreate { owner: "o".into(), name: "r".into(), priority: 0 })
+        .create(CollectionJobCreate {
+            owner: "o".into(),
+            name: "r".into(),
+            priority: 0,
+        })
         .await?;
 
-    let fetcher: Arc<dyn DataFetcher> = Arc::new(StubFetcher { mode: Mode::Transient });
+    let fetcher: Arc<dyn DataFetcher> = Arc::new(StubFetcher {
+        mode: Mode::Transient,
+    });
     let collector = Collector::new(cfg(), fetcher, repos);
     collector.run_once().await?;
 
@@ -157,10 +184,16 @@ async fn job_errors_on_permanent_error() -> Result<()> {
 
     let job = db
         .collection_jobs()
-        .create(CollectionJobCreate { owner: "o".into(), name: "r".into(), priority: 0 })
+        .create(CollectionJobCreate {
+            owner: "o".into(),
+            name: "r".into(),
+            priority: 0,
+        })
         .await?;
 
-    let fetcher: Arc<dyn DataFetcher> = Arc::new(StubFetcher { mode: Mode::Permanent });
+    let fetcher: Arc<dyn DataFetcher> = Arc::new(StubFetcher {
+        mode: Mode::Permanent,
+    });
     let collector = Collector::new(cfg(), fetcher, repos);
     collector.run_once().await?;
 
