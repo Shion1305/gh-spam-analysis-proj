@@ -10,8 +10,8 @@ use http::{header, Request, StatusCode};
 use normalizer::models::NormalizedUser;
 use normalizer::payloads::{CommentPayload, IssuePayload, RepoPayload, UserPayload, UserRef};
 use serde_json::{json, Value};
-use tokio::sync::Mutex;
 use std::time::Instant;
+use tokio::sync::Mutex;
 
 use crate::client::{GithubApiError, GithubClient};
 use crate::fetcher::{

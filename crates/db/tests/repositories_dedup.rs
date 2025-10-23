@@ -100,4 +100,3 @@ async fn repos_full_name_is_case_insensitive_unique() -> anyhow::Result<()> {
     handle.cleanup().await?;
     Ok(())
 }
-
