@@ -14,6 +14,7 @@ use http::StatusCode;
 use normalizer::models::{
     NormalizedComment, NormalizedIssue, NormalizedRepository, NormalizedUser,
 };
+use normalizer::payloads::UserRef;
 use normalizer::{
     normalize_comment, normalize_issue, normalize_repo, normalize_user, CommentPayload,
     IssuePayload, RepoPayload, UserPayload,
@@ -372,7 +373,7 @@ impl<C: GithubClient + 'static> Collector<C> {
                 let issue_row = to_issue_row(&normalized_issue);
                 let (posts_before, user_row) = if let Some(user_ref) = &issue_payload.user {
                     let posts = record_post(session_counts, &user_ref.login);
-                    self.ensure_user(&user_ref.login, &mut user_cache).await?;
+                    self.ensure_user(user_ref, &mut user_cache).await?;
                     let user_row = self.repos.users().get_by_login(&user_ref.login).await?;
                     (posts, user_row)
                 } else {
@@ -456,7 +457,7 @@ impl<C: GithubClient + 'static> Collector<C> {
     ) -> Result<()> {
         let mut page = 1u32;
         loop {
-            let comments = self
+            let comments = match self
                 .client
                 .list_issue_comments(
                     owner,
@@ -465,7 +466,28 @@ impl<C: GithubClient + 'static> Collector<C> {
                     page,
                     self.config.page_size,
                 )
-                .await?;
+                .await
+            {
+                Ok(comments) => comments,
+                Err(err) => {
+                    let details = extract_error_details(&err);
+                    if matches!(details.status, Some(StatusCode::NOT_FOUND)) {
+                        warn!(
+                            repo = ctx.repo_full_name,
+                            issue_number = issue.number,
+                            status_code = details.status.map(|s| s.as_u16()),
+                            "issue not found while listing comments"
+                        );
+                        if issue.found {
+                            let mut missing_issue = issue.clone();
+                            missing_issue.found = false;
+                            self.repos.issues().upsert(missing_issue).await?;
+                        }
+                        return Ok(());
+                    }
+                    return Err(err);
+                }
+            };
             if comments.is_empty() {
                 break;
             }
@@ -477,7 +499,7 @@ impl<C: GithubClient + 'static> Collector<C> {
                     normalize_comment(&comment_payload, issue.id, comment_value.clone());
                 let (posts_before, user_row) = if let Some(user_ref) = &comment_payload.user {
                     let posts = record_post(ctx.session_counts, &user_ref.login);
-                    self.ensure_user(&user_ref.login, ctx.user_cache).await?;
+                    self.ensure_user(user_ref, ctx.user_cache).await?;
                     let user_row = self.repos.users().get_by_login(&user_ref.login).await?;
                     (posts, user_row)
                 } else {
@@ -513,17 +535,48 @@ impl<C: GithubClient + 'static> Collector<C> {
         Ok(())
     }
 
-    async fn ensure_user(&self, login: &str, cache: &mut HashSet<String>) -> Result<()> {
-        if !cache.insert(login.to_string()) {
+    async fn ensure_user(&self, user_ref: &UserRef, cache: &mut HashSet<String>) -> Result<()> {
+        if !cache.insert(user_ref.login.clone()) {
             return Ok(());
         }
-        let user_value = self.client.get_user(login).await?;
-        metrics::USERS_FETCHED_TOTAL.inc();
-        let user_payload: UserPayload = serde_json::from_value(user_value.clone())?;
-        let normalized_user = normalize_user(&user_payload, user_value);
-        let user_row = to_user_row(&normalized_user);
-        self.repos.users().upsert(user_row).await?;
-        Ok(())
+        match self.client.get_user(&user_ref.login).await {
+            Ok(user_value) => {
+                metrics::USERS_FETCHED_TOTAL.inc();
+                let user_payload: UserPayload = serde_json::from_value(user_value.clone())?;
+                let normalized_user = normalize_user(&user_payload, user_value);
+                let mut user_row = to_user_row(&normalized_user);
+                user_row.found = true;
+                self.repos.users().upsert(user_row).await?;
+                Ok(())
+            }
+            Err(err) => {
+                let details = extract_error_details(&err);
+                if matches!(details.status, Some(StatusCode::NOT_FOUND)) {
+                    warn!(
+                        login = %user_ref.login,
+                        user_id = user_ref.id,
+                        status_code = details.status.map(|s| s.as_u16()),
+                        "user not found - marking as missing"
+                    );
+                    let placeholder = UserRow {
+                        id: user_ref.id,
+                        login: user_ref.login.clone(),
+                        user_type: "unknown".to_string(),
+                        site_admin: false,
+                        created_at: None,
+                        followers: None,
+                        following: None,
+                        public_repos: None,
+                        raw: serde_json::json!({"not_found": true}),
+                        found: false,
+                    };
+                    self.repos.users().upsert(placeholder).await?;
+                    Ok(())
+                } else {
+                    Err(err)
+                }
+            }
+        }
     }
 }
 
@@ -555,6 +608,7 @@ fn to_user_row(normalized: &NormalizedUser) -> UserRow {
         following: normalized.following,
         public_repos: normalized.public_repos,
         raw: normalized.raw.clone(),
+        found: true,
     }
 }
 
@@ -574,6 +628,7 @@ fn to_issue_row(normalized: &NormalizedIssue) -> IssueRow {
         closed_at: normalized.closed_at,
         dedupe_hash: normalized.dedupe_hash.clone(),
         raw: normalized.raw.clone(),
+        found: true,
     }
 }
 
@@ -587,6 +642,7 @@ fn to_comment_row(normalized: &NormalizedComment) -> CommentRow {
         updated_at: normalized.updated_at,
         dedupe_hash: normalized.dedupe_hash.clone(),
         raw: normalized.raw.clone(),
+        found: true,
     }
 }
 

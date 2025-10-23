@@ -201,8 +201,8 @@ impl UserRepository for PgUserRepository {
     async fn upsert(&self, user: UserRow) -> Result<()> {
         sqlx::query(
             r#"
-            INSERT INTO users (id, login, type, site_admin, created_at, followers, following, public_repos, raw)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            INSERT INTO users (id, login, type, site_admin, created_at, followers, following, public_repos, raw, found)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             ON CONFLICT (id) DO UPDATE
                 SET login = EXCLUDED.login,
                     type = EXCLUDED.type,
@@ -211,7 +211,8 @@ impl UserRepository for PgUserRepository {
                     followers = EXCLUDED.followers,
                     following = EXCLUDED.following,
                     public_repos = EXCLUDED.public_repos,
-                    raw = EXCLUDED.raw
+                    raw = EXCLUDED.raw,
+                    found = EXCLUDED.found
             "#
         )
         .bind(user.id)
@@ -223,6 +224,7 @@ impl UserRepository for PgUserRepository {
         .bind(user.following)
         .bind(user.public_repos)
         .bind(user.raw)
+        .bind(user.found)
         .execute(&self.pool)
         .await
         .map(|_| ())
@@ -232,7 +234,7 @@ impl UserRepository for PgUserRepository {
     async fn get_by_id(&self, id: i64) -> Result<Option<UserRow>> {
         sqlx::query_as::<_, UserRow>(
             r#"
-            SELECT id, login, type as "user_type", site_admin, created_at, followers, following, public_repos, raw
+            SELECT id, login, type as "user_type", site_admin, created_at, followers, following, public_repos, raw, found
             FROM users
             WHERE id = $1
             "#
@@ -246,7 +248,7 @@ impl UserRepository for PgUserRepository {
     async fn get_by_login(&self, login: &str) -> Result<Option<UserRow>> {
         sqlx::query_as::<_, UserRow>(
             r#"
-            SELECT id, login, type as "user_type", site_admin, created_at, followers, following, public_repos, raw
+            SELECT id, login, type as "user_type", site_admin, created_at, followers, following, public_repos, raw, found
             FROM users
             WHERE login = $1
             "#
@@ -270,9 +272,9 @@ impl IssueRepository for PgIssueRepository {
             r#"
             INSERT INTO issues (
                 id, repo_id, number, is_pull_request, state, title, body, user_id,
-                comments_count, created_at, updated_at, closed_at, dedupe_hash, raw
+                comments_count, created_at, updated_at, closed_at, dedupe_hash, raw, found
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
             ON CONFLICT (id) DO UPDATE
                 SET repo_id = EXCLUDED.repo_id,
                     number = EXCLUDED.number,
@@ -286,7 +288,8 @@ impl IssueRepository for PgIssueRepository {
                     updated_at = EXCLUDED.updated_at,
                     closed_at = EXCLUDED.closed_at,
                     dedupe_hash = EXCLUDED.dedupe_hash,
-                    raw = EXCLUDED.raw
+                    raw = EXCLUDED.raw,
+                    found = EXCLUDED.found
             "#,
         )
         .bind(issue.id)
@@ -303,6 +306,7 @@ impl IssueRepository for PgIssueRepository {
         .bind(issue.closed_at)
         .bind(issue.dedupe_hash)
         .bind(issue.raw)
+        .bind(issue.found)
         .execute(&self.pool)
         .await
         .map(|_| ())
@@ -313,7 +317,7 @@ impl IssueRepository for PgIssueRepository {
         let mut builder = QueryBuilder::<Postgres>::new(
             r#"
             SELECT id, repo_id, number, is_pull_request, state, title, body, user_id,
-                   comments_count, created_at, updated_at, closed_at, dedupe_hash, raw
+                   comments_count, created_at, updated_at, closed_at, dedupe_hash, raw, found
             FROM issues
             "#,
         );
@@ -374,7 +378,7 @@ impl IssueRepository for PgIssueRepository {
                 r#"
                 SELECT id, repo_id, number, is_pull_request, state, title, body,
                        user_id, comments_count, created_at, updated_at, closed_at,
-                       dedupe_hash, raw
+                       dedupe_hash, raw, found
                 FROM issues
                 WHERE repo_id = $1 AND updated_at >= $2
                 ORDER BY updated_at DESC
@@ -390,7 +394,7 @@ impl IssueRepository for PgIssueRepository {
                 r#"
                 SELECT id, repo_id, number, is_pull_request, state, title, body,
                        user_id, comments_count, created_at, updated_at, closed_at,
-                       dedupe_hash, raw
+                       dedupe_hash, raw, found
                 FROM issues
                 WHERE repo_id = $1
                 ORDER BY updated_at DESC
@@ -415,9 +419,9 @@ impl CommentRepository for PgCommentRepository {
         sqlx::query(
             r#"
             INSERT INTO comments (
-                id, issue_id, user_id, body, created_at, updated_at, dedupe_hash, raw
+                id, issue_id, user_id, body, created_at, updated_at, dedupe_hash, raw, found
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             ON CONFLICT (id) DO UPDATE
                 SET issue_id = EXCLUDED.issue_id,
                     user_id = EXCLUDED.user_id,
@@ -425,7 +429,8 @@ impl CommentRepository for PgCommentRepository {
                     created_at = EXCLUDED.created_at,
                     updated_at = EXCLUDED.updated_at,
                     dedupe_hash = EXCLUDED.dedupe_hash,
-                    raw = EXCLUDED.raw
+                    raw = EXCLUDED.raw,
+                    found = EXCLUDED.found
             "#,
         )
         .bind(comment.id)
@@ -436,6 +441,7 @@ impl CommentRepository for PgCommentRepository {
         .bind(comment.updated_at)
         .bind(comment.dedupe_hash)
         .bind(comment.raw)
+        .bind(comment.found)
         .execute(&self.pool)
         .await
         .map(|_| ())
@@ -446,6 +452,7 @@ impl CommentRepository for PgCommentRepository {
         sqlx::query_as::<_, CommentRow>(
             r#"
             SELECT id, issue_id, user_id, body, created_at, updated_at, dedupe_hash, raw
+                   , found
             FROM comments
             WHERE issue_id = $1
             ORDER BY created_at

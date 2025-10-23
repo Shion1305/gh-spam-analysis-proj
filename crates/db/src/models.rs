@@ -34,6 +34,7 @@ pub struct UserRow {
     pub following: Option<i64>,
     pub public_repos: Option<i64>,
     pub raw: serde_json::Value,
+    pub found: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -52,6 +53,7 @@ pub struct IssueRow {
     pub closed_at: Option<DateTime<Utc>>,
     pub dedupe_hash: String,
     pub raw: serde_json::Value,
+    pub found: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -64,6 +66,7 @@ pub struct CommentRow {
     pub updated_at: Option<DateTime<Utc>>,
     pub dedupe_hash: String,
     pub raw: serde_json::Value,
+    pub found: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]

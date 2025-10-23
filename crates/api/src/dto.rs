@@ -40,6 +40,7 @@ pub struct IssueDto {
     pub closed_at: Option<DateTime<Utc>>,
     pub spam_score: Option<f32>,
     pub spam_reasons: Vec<String>,
+    pub found: bool,
 }
 
 impl IssueDto {
@@ -59,6 +60,7 @@ impl IssueDto {
             closed_at: row.closed_at,
             spam_score: spam,
             spam_reasons: reasons,
+            found: row.found,
         }
     }
 }
@@ -73,6 +75,7 @@ pub struct UserDto {
     pub followers: Option<i64>,
     pub following: Option<i64>,
     pub public_repos: Option<i64>,
+    pub found: bool,
 }
 
 impl From<UserRow> for UserDto {
@@ -86,6 +89,7 @@ impl From<UserRow> for UserDto {
             followers: row.followers,
             following: row.following,
             public_repos: row.public_repos,
+            found: row.found,
         }
     }
 }
