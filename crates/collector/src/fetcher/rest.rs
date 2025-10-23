@@ -9,12 +9,14 @@ use normalizer::models::{
 };
 use normalizer::payloads::{CommentPayload, IssuePayload, RepoPayload, UserPayload, UserRef};
 use serde_json::Value;
+use std::time::Instant;
 
 use crate::client::{GithubApiError, GithubClient};
 use crate::fetcher::{
     CommentPage, CommentRecord, DataFetcher, IssuePage, IssueRecord, MissingUser, RepoSnapshot,
     UserFetch,
 };
+use crate::metrics;
 
 pub struct RestDataFetcher {
     client: Arc<dyn GithubClient>,
@@ -29,10 +31,35 @@ impl RestDataFetcher {
 #[async_trait]
 impl DataFetcher for RestDataFetcher {
     async fn fetch_repo(&self, owner: &str, name: &str) -> Result<RepoSnapshot> {
-        let repo_value = self.client.get_repo(owner, name).await?;
-        let repo_payload: RepoPayload = serde_json::from_value(repo_value.clone())?;
-        let repository = normalize_repo(&repo_payload, repo_value);
-        Ok(RepoSnapshot { repository })
+        let op = "repo";
+        let start = Instant::now();
+        let result = async {
+            let repo_value = self.client.get_repo(owner, name).await?;
+            let repo_payload: RepoPayload = serde_json::from_value(repo_value.clone())?;
+            let repository = normalize_repo(&repo_payload, repo_value);
+            Ok::<_, anyhow::Error>(RepoSnapshot { repository })
+        }
+        .await;
+        let elapsed = start.elapsed().as_secs_f64();
+        match &result {
+            Ok(_) => {
+                metrics::FETCH_REQUESTS_TOTAL
+                    .with_label_values(&["rest", op, "success"])
+                    .inc();
+                metrics::FETCH_LATENCY_SECONDS
+                    .with_label_values(&["rest", op])
+                    .observe(elapsed);
+            }
+            Err(_) => {
+                metrics::FETCH_REQUESTS_TOTAL
+                    .with_label_values(&["rest", op, "error"])
+                    .inc();
+                metrics::FETCH_LATENCY_SECONDS
+                    .with_label_values(&["rest", op])
+                    .observe(elapsed);
+            }
+        }
+        result
     }
 
     async fn fetch_issues(
@@ -44,16 +71,39 @@ impl DataFetcher for RestDataFetcher {
         cursor: Option<String>,
         per_page: u32,
     ) -> Result<IssuePage> {
+        let op = "issues";
+        let start = Instant::now();
         let page = cursor
             .as_deref()
             .and_then(|value| value.parse::<u32>().ok())
             .filter(|page| *page > 0)
             .unwrap_or(1);
 
-        let issues = self
+        let issues_result = self
             .client
             .list_repo_issues(owner, name, since, page, per_page)
-            .await?;
+            .await;
+        let elapsed = start.elapsed().as_secs_f64();
+        let issues = match issues_result {
+            Ok(v) => {
+                metrics::FETCH_REQUESTS_TOTAL
+                    .with_label_values(&["rest", op, "success"])
+                    .inc();
+                metrics::FETCH_LATENCY_SECONDS
+                    .with_label_values(&["rest", op])
+                    .observe(elapsed);
+                v
+            }
+            Err(e) => {
+                metrics::FETCH_REQUESTS_TOTAL
+                    .with_label_values(&["rest", op, "error"])
+                    .inc();
+                metrics::FETCH_LATENCY_SECONDS
+                    .with_label_values(&["rest", op])
+                    .observe(elapsed);
+                return Err(e);
+            }
+        };
 
         let mut items = Vec::with_capacity(issues.len());
 
@@ -72,6 +122,9 @@ impl DataFetcher for RestDataFetcher {
             None
         };
 
+        metrics::FETCH_ITEMS_TOTAL
+            .with_label_values(&["rest", op])
+            .inc_by(items.len() as u64);
         Ok(IssuePage { items, next_cursor })
     }
 
@@ -84,16 +137,39 @@ impl DataFetcher for RestDataFetcher {
         cursor: Option<String>,
         per_page: u32,
     ) -> Result<CommentPage> {
+        let op = "comments";
+        let start = Instant::now();
         let page = cursor
             .as_deref()
             .and_then(|value| value.parse::<u32>().ok())
             .filter(|page| *page > 0)
             .unwrap_or(1);
 
-        let comments = self
+        let comments_result = self
             .client
             .list_issue_comments(owner, name, issue_number as u64, page, per_page)
-            .await?;
+            .await;
+        let elapsed = start.elapsed().as_secs_f64();
+        let comments = match comments_result {
+            Ok(v) => {
+                metrics::FETCH_REQUESTS_TOTAL
+                    .with_label_values(&["rest", op, "success"])
+                    .inc();
+                metrics::FETCH_LATENCY_SECONDS
+                    .with_label_values(&["rest", op])
+                    .observe(elapsed);
+                v
+            }
+            Err(e) => {
+                metrics::FETCH_REQUESTS_TOTAL
+                    .with_label_values(&["rest", op, "error"])
+                    .inc();
+                metrics::FETCH_LATENCY_SECONDS
+                    .with_label_values(&["rest", op])
+                    .observe(elapsed);
+                return Err(e);
+            }
+        };
 
         let mut items = Vec::with_capacity(comments.len());
 
@@ -112,19 +188,38 @@ impl DataFetcher for RestDataFetcher {
             None
         };
 
+        metrics::FETCH_ITEMS_TOTAL
+            .with_label_values(&["rest", op])
+            .inc_by(items.len() as u64);
         Ok(CommentPage { items, next_cursor })
     }
 
     async fn fetch_user(&self, user: &UserRef) -> Result<UserFetch> {
-        match self.client.get_user(&user.login).await {
+        let op = "user";
+        let start = Instant::now();
+        let result = self.client.get_user(&user.login).await;
+        let elapsed = start.elapsed().as_secs_f64();
+        match result {
             Ok(user_value) => {
                 let payload: UserPayload = serde_json::from_value(user_value.clone())?;
                 let normalized = normalize_user(&payload, user_value);
+                metrics::FETCH_REQUESTS_TOTAL
+                    .with_label_values(&["rest", op, "success"])
+                    .inc();
+                metrics::FETCH_LATENCY_SECONDS
+                    .with_label_values(&["rest", op])
+                    .observe(elapsed);
                 Ok(UserFetch::Found(normalized))
             }
             Err(err) => {
                 if let Some(api_err) = err.downcast_ref::<GithubApiError>() {
                     if matches!(api_err.status_code(), StatusCode::NOT_FOUND) {
+                        metrics::FETCH_REQUESTS_TOTAL
+                            .with_label_values(&["rest", op, "success"])
+                            .inc();
+                        metrics::FETCH_LATENCY_SECONDS
+                            .with_label_values(&["rest", op])
+                            .observe(elapsed);
                         return Ok(UserFetch::Missing(MissingUser {
                             id: user.id,
                             login: user.login.clone(),
@@ -132,6 +227,12 @@ impl DataFetcher for RestDataFetcher {
                         }));
                     }
                 }
+                metrics::FETCH_REQUESTS_TOTAL
+                    .with_label_values(&["rest", op, "error"])
+                    .inc();
+                metrics::FETCH_LATENCY_SECONDS
+                    .with_label_values(&["rest", op])
+                    .observe(elapsed);
                 Err(err)
             }
         }

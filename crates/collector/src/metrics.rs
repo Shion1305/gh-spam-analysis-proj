@@ -168,6 +168,35 @@ pub static REPO_LAST_SUCCESS_TIMESTAMP: Lazy<IntGaugeVec> = Lazy::new(|| {
     .expect("collector repository last success timestamp")
 });
 
+// Per-fetcher metrics (REST vs GraphQL)
+pub static FETCH_REQUESTS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_int_counter_vec!(
+        "collector_fetch_requests_total",
+        "Total number of fetcher calls grouped by fetcher (rest/graphql), operation, and outcome",
+        &["fetcher", "op", "outcome"]
+    )
+    .expect("collector fetch requests total")
+});
+
+pub static FETCH_ITEMS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_int_counter_vec!(
+        "collector_fetch_items_total",
+        "Number of items returned by fetch operations grouped by fetcher and operation",
+        &["fetcher", "op"]
+    )
+    .expect("collector fetch items total")
+});
+
+pub static FETCH_LATENCY_SECONDS: Lazy<HistogramVec> = Lazy::new(|| {
+    register_histogram_vec!(
+        "collector_fetch_latency_seconds",
+        "Latency of fetcher calls grouped by fetcher and operation",
+        &["fetcher", "op"],
+        vec![0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0]
+    )
+    .expect("collector fetch latency seconds")
+});
+
 pub struct ActiveRepoGuard;
 
 impl Default for ActiveRepoGuard {

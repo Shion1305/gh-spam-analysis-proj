@@ -11,12 +11,14 @@ use normalizer::models::NormalizedUser;
 use normalizer::payloads::{CommentPayload, IssuePayload, RepoPayload, UserPayload, UserRef};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
+use std::time::Instant;
 
 use crate::client::{GithubApiError, GithubClient};
 use crate::fetcher::{
     CommentPage, CommentRecord, DataFetcher, IssuePage, IssueRecord, MissingUser, RepoSnapshot,
     UserFetch,
 };
+use crate::metrics;
 
 const GRAPHQL_ENDPOINT: &str = "https://api.github.com/graphql";
 
@@ -427,6 +429,8 @@ impl GraphqlDataFetcher {
 #[async_trait]
 impl DataFetcher for GraphqlDataFetcher {
     async fn fetch_repo(&self, owner: &str, name: &str) -> Result<RepoSnapshot> {
+        let op = "repo";
+        let start = Instant::now();
         let response = self
             .execute_graphql(
                 REPO_QUERY,
@@ -435,7 +439,28 @@ impl DataFetcher for GraphqlDataFetcher {
                     "name": name,
                 }),
             )
-            .await?;
+            .await;
+        let elapsed = start.elapsed().as_secs_f64();
+        let response = match response {
+            Ok(v) => {
+                metrics::FETCH_REQUESTS_TOTAL
+                    .with_label_values(&["graphql", op, "success"])
+                    .inc();
+                metrics::FETCH_LATENCY_SECONDS
+                    .with_label_values(&["graphql", op])
+                    .observe(elapsed);
+                v
+            }
+            Err(e) => {
+                metrics::FETCH_REQUESTS_TOTAL
+                    .with_label_values(&["graphql", op, "error"])
+                    .inc();
+                metrics::FETCH_LATENCY_SECONDS
+                    .with_label_values(&["graphql", op])
+                    .observe(elapsed);
+                return Err(e);
+            }
+        };
 
         let repository = self.extract_repository(&response, owner, name)?;
 
@@ -481,9 +506,11 @@ impl DataFetcher for GraphqlDataFetcher {
         cursor: Option<String>,
         per_page: u32,
     ) -> Result<IssuePage> {
+        let op = "issues";
         let per_page = per_page.min(100);
         let comments_per_page = per_page;
         let since_value = since.map(|dt| dt.to_rfc3339());
+        let start = Instant::now();
         let response = self
             .execute_graphql(
                 ISSUES_QUERY,
@@ -496,7 +523,28 @@ impl DataFetcher for GraphqlDataFetcher {
                     "since": since_value,
                 }),
             )
-            .await?;
+            .await;
+        let elapsed = start.elapsed().as_secs_f64();
+        let response = match response {
+            Ok(v) => {
+                metrics::FETCH_REQUESTS_TOTAL
+                    .with_label_values(&["graphql", op, "success"])
+                    .inc();
+                metrics::FETCH_LATENCY_SECONDS
+                    .with_label_values(&["graphql", op])
+                    .observe(elapsed);
+                v
+            }
+            Err(e) => {
+                metrics::FETCH_REQUESTS_TOTAL
+                    .with_label_values(&["graphql", op, "error"])
+                    .inc();
+                metrics::FETCH_LATENCY_SECONDS
+                    .with_label_values(&["graphql", op])
+                    .observe(elapsed);
+                return Err(e);
+            }
+        };
 
         let repository = self.extract_repository(&response, owner, name)?;
 
@@ -619,6 +667,9 @@ impl DataFetcher for GraphqlDataFetcher {
             }
         }
 
+        metrics::FETCH_ITEMS_TOTAL
+            .with_label_values(&["graphql", op])
+            .inc_by(items.len() as u64);
         Ok(IssuePage { items, next_cursor })
     }
 
@@ -631,6 +682,7 @@ impl DataFetcher for GraphqlDataFetcher {
         cursor: Option<String>,
         per_page: u32,
     ) -> Result<CommentPage> {
+        let op = "comments";
         let key = IssueKey::new(owner, name, issue_number);
         if cursor.is_none() {
             if let Some(entry) = self.take_initial_comments(&key).await {
@@ -642,6 +694,7 @@ impl DataFetcher for GraphqlDataFetcher {
         }
 
         let per_page = per_page.min(100);
+        let start = Instant::now();
         let response = self
             .execute_graphql(
                 ISSUE_COMMENTS_QUERY,
@@ -653,7 +706,28 @@ impl DataFetcher for GraphqlDataFetcher {
                     "cursor": cursor,
                 }),
             )
-            .await?;
+            .await;
+        let elapsed = start.elapsed().as_secs_f64();
+        let response = match response {
+            Ok(v) => {
+                metrics::FETCH_REQUESTS_TOTAL
+                    .with_label_values(&["graphql", op, "success"])
+                    .inc();
+                metrics::FETCH_LATENCY_SECONDS
+                    .with_label_values(&["graphql", op])
+                    .observe(elapsed);
+                v
+            }
+            Err(e) => {
+                metrics::FETCH_REQUESTS_TOTAL
+                    .with_label_values(&["graphql", op, "error"])
+                    .inc();
+                metrics::FETCH_LATENCY_SECONDS
+                    .with_label_values(&["graphql", op])
+                    .observe(elapsed);
+                return Err(e);
+            }
+        };
 
         let repository = self.extract_repository(&response, owner, name)?;
         let issue_value = repository
@@ -675,27 +749,52 @@ impl DataFetcher for GraphqlDataFetcher {
             .collect_comment_records(comments_conn, issue_id)
             .await?;
 
+        metrics::FETCH_ITEMS_TOTAL
+            .with_label_values(&["graphql", op])
+            .inc_by(items.len() as u64);
         Ok(CommentPage { items, next_cursor })
     }
 
     async fn fetch_user(&self, user: &UserRef) -> Result<UserFetch> {
+        let op = "user";
+        let start = Instant::now();
         {
             let cache = self.user_cache.lock().await;
             if let Some(user_data) = cache.get(&user.login) {
+                metrics::FETCH_REQUESTS_TOTAL
+                    .with_label_values(&["graphql", op, "success"])
+                    .inc();
+                metrics::FETCH_LATENCY_SECONDS
+                    .with_label_values(&["graphql", op])
+                    .observe(start.elapsed().as_secs_f64());
                 return Ok(UserFetch::Found(user_data.clone()));
             }
         }
 
-        match self.rest_client.get_user(&user.login).await {
+        let result = self.rest_client.get_user(&user.login).await;
+        let elapsed = start.elapsed().as_secs_f64();
+        match result {
             Ok(value) => {
                 let payload: UserPayload = serde_json::from_value(value.clone())?;
                 let normalized = normalizer::normalize_user(&payload, value);
                 self.cache_user(normalized.clone()).await;
+                metrics::FETCH_REQUESTS_TOTAL
+                    .with_label_values(&["graphql", op, "success"])
+                    .inc();
+                metrics::FETCH_LATENCY_SECONDS
+                    .with_label_values(&["graphql", op])
+                    .observe(elapsed);
                 Ok(UserFetch::Found(normalized))
             }
             Err(err) => {
                 if let Some(api_err) = err.downcast_ref::<GithubApiError>() {
                     if matches!(api_err.status_code(), StatusCode::NOT_FOUND) {
+                        metrics::FETCH_REQUESTS_TOTAL
+                            .with_label_values(&["graphql", op, "success"])
+                            .inc();
+                        metrics::FETCH_LATENCY_SECONDS
+                            .with_label_values(&["graphql", op])
+                            .observe(elapsed);
                         return Ok(UserFetch::Missing(MissingUser {
                             id: user.id,
                             login: user.login.clone(),
@@ -703,6 +802,12 @@ impl DataFetcher for GraphqlDataFetcher {
                         }));
                     }
                 }
+                metrics::FETCH_REQUESTS_TOTAL
+                    .with_label_values(&["graphql", op, "error"])
+                    .inc();
+                metrics::FETCH_LATENCY_SECONDS
+                    .with_label_values(&["graphql", op])
+                    .observe(elapsed);
                 Err(err)
             }
         }
