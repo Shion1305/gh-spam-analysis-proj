@@ -8,8 +8,14 @@ use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
-use collector::{BrokerGithubClient, Collector};
-use common::{config::AppConfig, logging};
+use collector::{
+    fetcher::{DataFetcher, GraphqlDataFetcher, RestDataFetcher},
+    BrokerGithubClient, Collector, GithubClient,
+};
+use common::{
+    config::{AppConfig, FetchMode},
+    logging,
+};
 use db::pg::PgDatabase;
 use db::Repositories;
 use gh_broker::{Budget, GithubBrokerBuilder, GithubToken as BrokerToken, Priority};
@@ -63,15 +69,24 @@ async fn main() -> Result<()> {
     });
 
     let broker = builder.build();
-    let client = Arc::new(BrokerGithubClient::new(
-        broker,
+    let client: Arc<dyn GithubClient> = Arc::new(BrokerGithubClient::new(
+        broker.clone(),
         config.github.user_agent.clone(),
     ));
+    let fetcher: Arc<dyn DataFetcher> = match config.collector.fetch_mode {
+        FetchMode::Rest => Arc::new(RestDataFetcher::new(client.clone())),
+        FetchMode::Graphql | FetchMode::Hybrid => Arc::new(GraphqlDataFetcher::new(
+            broker.clone(),
+            client.clone(),
+            config.github.user_agent.clone(),
+        )),
+    };
+    info!(fetch_mode = ?config.collector.fetch_mode, "collector fetch mode selected");
 
     let database = Arc::new(PgDatabase::connect(&config.database.url).await?);
     let repositories: Arc<dyn Repositories> = database.clone() as Arc<dyn Repositories>;
 
-    let collector = Collector::new(config.collector.clone(), client, repositories);
+    let collector = Collector::new(config.collector.clone(), fetcher, repositories);
     info!(
         interval = config.collector.interval_secs,
         "collector started"

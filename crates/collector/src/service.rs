@@ -15,15 +15,12 @@ use normalizer::models::{
     NormalizedComment, NormalizedIssue, NormalizedRepository, NormalizedUser,
 };
 use normalizer::payloads::UserRef;
-use normalizer::{
-    normalize_comment, normalize_issue, normalize_repo, normalize_user, CommentPayload,
-    IssuePayload, RepoPayload, UserPayload,
-};
 use serde::Deserialize;
 use tokio::time::sleep;
 use tracing::{info, instrument, warn};
 
-use crate::client::{GithubApiError, GithubClient};
+use crate::client::GithubApiError;
+use crate::fetcher::{DataFetcher, UserFetch};
 use crate::metrics::{self, ActiveRepoGuard};
 use common::config::CollectorConfig;
 use gh_broker::HttpStatusError;
@@ -34,9 +31,9 @@ pub struct SeedRepo {
     pub name: String,
 }
 
-pub struct Collector<C: GithubClient + 'static> {
+pub struct Collector {
     config: CollectorConfig,
-    client: Arc<C>,
+    fetcher: Arc<dyn DataFetcher>,
     repos: Arc<dyn Repositories>,
 }
 
@@ -48,11 +45,15 @@ struct ProcessContext<'a> {
     repo_full_name: &'a str,
 }
 
-impl<C: GithubClient + 'static> Collector<C> {
-    pub fn new(config: CollectorConfig, client: Arc<C>, repos: Arc<dyn Repositories>) -> Self {
+impl Collector {
+    pub fn new(
+        config: CollectorConfig,
+        fetcher: Arc<dyn DataFetcher>,
+        repos: Arc<dyn Repositories>,
+    ) -> Self {
         Self {
             config,
-            client,
+            fetcher,
             repos,
         }
     }
@@ -320,14 +321,12 @@ impl<C: GithubClient + 'static> Collector<C> {
     ) -> Result<()> {
         let _active_repo = ActiveRepoGuard::new();
         let repo_full_name = format!("{}/{}", seed.owner, seed.name);
-        let repo_value = self
-            .client
-            .get_repo(&seed.owner, &seed.name)
+        let repo_snapshot = self
+            .fetcher
+            .fetch_repo(&seed.owner, &seed.name)
             .await
             .with_context(|| format!("fetching repo {}", seed.name))?;
-        let repo_payload: RepoPayload = serde_json::from_value(repo_value.clone())?;
-        let normalized_repo = normalize_repo(&repo_payload, repo_value.clone());
-        let repo_row = to_repo_row(&normalized_repo);
+        let repo_row = to_repo_row(&repo_snapshot.repository);
         self.repos.repos().upsert(repo_row.clone()).await?;
         info!(full_name = %repo_row.full_name, "ingesting repository");
 
@@ -338,40 +337,39 @@ impl<C: GithubClient + 'static> Collector<C> {
             .await?
             .map(|w| w.last_updated);
 
-        let mut page = 1u32;
+        let mut cursor: Option<String> = None;
         let mut newest_ts: Option<DateTime<Utc>> = watermark;
         let mut user_cache = HashSet::new();
         let mut seen_existing = false;
 
         loop {
-            let issues = self
-                .client
-                .list_repo_issues(
+            let page = self
+                .fetcher
+                .fetch_issues(
                     &seed.owner,
                     &seed.name,
+                    repo_row.id,
                     watermark,
-                    page,
+                    cursor.clone(),
                     self.config.page_size,
                 )
                 .await?;
 
-            if issues.is_empty() {
+            if page.items.is_empty() {
                 break;
             }
 
-            for issue_value in issues {
-                let issue_payload: IssuePayload = serde_json::from_value(issue_value.clone())?;
+            for record in page.items {
+                let issue = record.issue;
                 if let Some(since) = watermark {
-                    if issue_payload.updated_at <= since {
+                    if issue.updated_at <= since {
                         seen_existing = true;
                         break;
                     }
                 }
 
-                let normalized_issue =
-                    normalize_issue(&issue_payload, repo_row.id, issue_value.clone());
-                let issue_row = to_issue_row(&normalized_issue);
-                let (posts_before, user_row) = if let Some(user_ref) = &issue_payload.user {
+                let issue_row = to_issue_row(&issue);
+                let (posts_before, user_row) = if let Some(user_ref) = &record.author {
                     let posts = record_post(session_counts, &user_ref.login);
                     self.ensure_user(user_ref, &mut user_cache).await?;
                     let user_row = self.repos.users().get_by_login(&user_ref.login).await?;
@@ -379,7 +377,7 @@ impl<C: GithubClient + 'static> Collector<C> {
                 } else {
                     (0, None)
                 };
-                let dedupe_hits = record_dedupe(dedupe_counts, &normalized_issue.dedupe_hash);
+                let dedupe_hits = record_dedupe(dedupe_counts, &issue.dedupe_hash);
 
                 self.repos.issues().upsert(issue_row.clone()).await?;
                 metrics::ISSUES_PROCESSED_TOTAL
@@ -407,7 +405,7 @@ impl<C: GithubClient + 'static> Collector<C> {
                     _ => issue_row.updated_at,
                 });
 
-                if issue_payload.comments > 0 {
+                if issue_row.comments_count > 0 {
                     let mut ctx = ProcessContext {
                         rule_version,
                         user_cache: &mut user_cache,
@@ -424,7 +422,10 @@ impl<C: GithubClient + 'static> Collector<C> {
                 break;
             }
 
-            page += 1;
+            cursor = page.next_cursor;
+            if cursor.is_none() {
+                break;
+            }
         }
 
         if let Some(ts) = newest_ts {
@@ -455,20 +456,21 @@ impl<C: GithubClient + 'static> Collector<C> {
         name: &str,
         ctx: &mut ProcessContext<'_>,
     ) -> Result<()> {
-        let mut page = 1u32;
+        let mut cursor: Option<String> = None;
         loop {
-            let comments = match self
-                .client
-                .list_issue_comments(
+            let page = match self
+                .fetcher
+                .fetch_issue_comments(
                     owner,
                     name,
-                    issue.number as u64,
-                    page,
+                    issue.number,
+                    issue.id,
+                    cursor.clone(),
                     self.config.page_size,
                 )
                 .await
             {
-                Ok(comments) => comments,
+                Ok(page) => page,
                 Err(err) => {
                     let details = extract_error_details(&err);
                     if matches!(details.status, Some(StatusCode::NOT_FOUND)) {
@@ -488,16 +490,14 @@ impl<C: GithubClient + 'static> Collector<C> {
                     return Err(err);
                 }
             };
-            if comments.is_empty() {
+
+            if page.items.is_empty() {
                 break;
             }
 
-            for comment_value in comments {
-                let comment_payload: CommentPayload =
-                    serde_json::from_value(comment_value.clone())?;
-                let normalized_comment =
-                    normalize_comment(&comment_payload, issue.id, comment_value.clone());
-                let (posts_before, user_row) = if let Some(user_ref) = &comment_payload.user {
+            for record in page.items {
+                let comment = record.comment;
+                let (posts_before, user_row) = if let Some(user_ref) = &record.author {
                     let posts = record_post(ctx.session_counts, &user_ref.login);
                     self.ensure_user(user_ref, ctx.user_cache).await?;
                     let user_row = self.repos.users().get_by_login(&user_ref.login).await?;
@@ -505,9 +505,9 @@ impl<C: GithubClient + 'static> Collector<C> {
                 } else {
                     (0, None)
                 };
-                let dedupe_hits = record_dedupe(ctx.dedupe_counts, &normalized_comment.dedupe_hash);
+                let dedupe_hits = record_dedupe(ctx.dedupe_counts, &comment.dedupe_hash);
 
-                let comment_row = to_comment_row(&normalized_comment);
+                let comment_row = to_comment_row(&comment);
                 self.repos.comments().upsert(comment_row.clone()).await?;
                 metrics::COMMENTS_PROCESSED_TOTAL
                     .with_label_values(&[ctx.repo_full_name])
@@ -530,7 +530,11 @@ impl<C: GithubClient + 'static> Collector<C> {
                         .await?;
                 }
             }
-            page += 1;
+
+            cursor = page.next_cursor;
+            if cursor.is_none() {
+                break;
+            }
         }
         Ok(())
     }
@@ -539,42 +543,35 @@ impl<C: GithubClient + 'static> Collector<C> {
         if !cache.insert(user_ref.login.clone()) {
             return Ok(());
         }
-        match self.client.get_user(&user_ref.login).await {
-            Ok(user_value) => {
+        match self.fetcher.fetch_user(user_ref).await? {
+            UserFetch::Found(normalized_user) => {
                 metrics::USERS_FETCHED_TOTAL.inc();
-                let user_payload: UserPayload = serde_json::from_value(user_value.clone())?;
-                let normalized_user = normalize_user(&user_payload, user_value);
                 let mut user_row = to_user_row(&normalized_user);
                 user_row.found = true;
                 self.repos.users().upsert(user_row).await?;
                 Ok(())
             }
-            Err(err) => {
-                let details = extract_error_details(&err);
-                if matches!(details.status, Some(StatusCode::NOT_FOUND)) {
-                    warn!(
-                        login = %user_ref.login,
-                        user_id = user_ref.id,
-                        status_code = details.status.map(|s| s.as_u16()),
-                        "user not found - marking as missing"
-                    );
-                    let placeholder = UserRow {
-                        id: user_ref.id,
-                        login: user_ref.login.clone(),
-                        user_type: "unknown".to_string(),
-                        site_admin: false,
-                        created_at: None,
-                        followers: None,
-                        following: None,
-                        public_repos: None,
-                        raw: serde_json::json!({"not_found": true}),
-                        found: false,
-                    };
-                    self.repos.users().upsert(placeholder).await?;
-                    Ok(())
-                } else {
-                    Err(err)
-                }
+            UserFetch::Missing(missing) => {
+                warn!(
+                    login = %missing.login,
+                    user_id = missing.id,
+                    status_code = missing.status.map(|s| s.as_u16()),
+                    "user not found - marking as missing"
+                );
+                let placeholder = UserRow {
+                    id: missing.id,
+                    login: missing.login.clone(),
+                    user_type: "unknown".to_string(),
+                    site_admin: false,
+                    created_at: None,
+                    followers: None,
+                    following: None,
+                    public_repos: None,
+                    raw: serde_json::json!({"not_found": true}),
+                    found: false,
+                };
+                self.repos.users().upsert(placeholder).await?;
+                Ok(())
             }
         }
     }

@@ -1,4 +1,5 @@
 pub mod client;
+pub mod fetcher;
 pub mod metrics;
 pub mod service;
 
