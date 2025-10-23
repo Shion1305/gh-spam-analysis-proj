@@ -69,6 +69,7 @@ github-spam-lab/
    ```
 
    Configuration is loaded from `config/default.toml` or `config/local.toml` files, or via environment variables with `__` separator (e.g., `DATABASE__URL`, `API__BIND`).
+   The collector no longer uses `seed_repos_path`; repositories are enqueued via collection jobs.
 
 3. **Run components**
    ```bash
@@ -95,7 +96,7 @@ github-spam-lab/
    ```bash
    just format                  # cargo fmt
    just check                   # cargo fmt --check + cargo clippy -D warnings (uses SQLX_OFFLINE)
-   just test                    # cargo nextest run (requires Postgres running via `just up`)
+   just test                    # cargo nextest run (spins up a test Postgres container)
    just test-unit               # cargo nextest run --lib
    just test-integration        # cargo nextest run --tests
    ```
@@ -110,7 +111,7 @@ github-spam-lab/
    - Provides ETag caching & coalescing for GETs and emits Prometheus metrics.
 
 2. **Collector (`collector`)**
-   - Loads repositories from `scripts/seed_repos.json`.
+   - Seeds work from the `collection_jobs` table (create via API `POST /repos`).
    - Fetches issues (state=all, sorted by `updated`), uses watermarks to stop early.
    - Upserts repositories/issues/comments/users via `db` crate.
    - Memoizes user lookups and updates `collector_watermarks`.
@@ -125,7 +126,7 @@ github-spam-lab/
    - Persists outcomes into `spam_flags` (versioned) for auditability.
 
 5. **API (`api`)**
-   - Axum-based read-only service exposing `/repos`, `/issues`, `/actors`, `/top/spammy-users`, `/healthz`, `/metrics`.
+   - Axum-based service exposing `/repos` (POST to create jobs, GET to list), `/issues`, `/actors`, `/top/spammy-users`, `/healthz`, `/metrics`.
    - Depends on trait objects (repositories, broker client, etc.) for testability.
 
 ---

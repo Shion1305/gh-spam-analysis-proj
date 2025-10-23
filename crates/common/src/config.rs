@@ -104,8 +104,6 @@ pub struct CollectorConfig {
     pub page_size: u32,
     #[serde(default)]
     pub run_once: bool,
-    #[serde(default = "CollectorConfig::default_seed_path")]
-    pub seed_repos_path: String,
     #[serde(default)]
     pub fetch_mode: FetchMode,
 }
@@ -117,10 +115,6 @@ impl CollectorConfig {
 
     const fn default_page_size() -> u32 {
         100
-    }
-
-    fn default_seed_path() -> String {
-        "scripts/seed_repos.json".to_string()
     }
 }
 

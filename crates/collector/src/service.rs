@@ -577,11 +577,7 @@ impl Collector {
     }
 }
 
-pub async fn load_seed_repos(path: &str) -> Result<Vec<SeedRepo>> {
-    let data = tokio::fs::read_to_string(path).await?;
-    let seeds: Vec<SeedRepo> = serde_json::from_str(&data)?;
-    Ok(seeds)
-}
+// Historical helper removed: seeding is now done via collection_jobs and the API.
 
 fn to_repo_row(normalized: &NormalizedRepository) -> RepositoryRow {
     RepositoryRow {

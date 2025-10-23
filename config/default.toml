@@ -10,7 +10,6 @@ token_secrets = ""
 interval_secs = 30
 page_size = 100
 run_once = false
-seed_repos_path = "scripts/seed_repos.json"
 fetch_mode = "rest"
 
 [broker]

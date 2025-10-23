@@ -68,7 +68,6 @@ fn test_config() -> CollectorConfig {
         page_size: 50,
         interval_secs: 1,
         run_once: true,
-        seed_repos_path: "".into(),
         fetch_mode: FetchMode::Rest,
     }
 }
