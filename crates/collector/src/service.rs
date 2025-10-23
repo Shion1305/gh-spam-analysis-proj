@@ -674,23 +674,25 @@ fn record_dedupe(counts: &mut HashMap<String, u32>, hash: &str) -> u32 {
 /// - Network errors - timeouts, connection issues
 /// - Other errors - parsing issues, etc.
 fn is_permanent_error(err: &anyhow::Error) -> bool {
-    if let Some(api_err) = err.downcast_ref::<GithubApiError>() {
-        return match api_err {
-            GithubApiError::Http { status, endpoint } => match *status {
-                StatusCode::NOT_FOUND => {
+    if let Some(status) = status_from_error(err) {
+        match status {
+            StatusCode::NOT_FOUND => {
+                if let Some(endpoint) = endpoint_from_error(err) {
                     let segments: Vec<&str> = endpoint
                         .trim_matches('/')
                         .split('/')
                         .filter(|s| !s.is_empty())
                         .collect();
-                    segments.len() == 3 && segments[0] == "repos"
+                    if segments.len() == 3 && segments[0] == "repos" {
+                        return true;
+                    }
                 }
-                StatusCode::FORBIDDEN
-                | StatusCode::UNAVAILABLE_FOR_LEGAL_REASONS
-                | StatusCode::GONE => true,
-                _ => false,
-            },
-        };
+            }
+            StatusCode::FORBIDDEN
+            | StatusCode::UNAVAILABLE_FOR_LEGAL_REASONS
+            | StatusCode::GONE => return true,
+            _ => {}
+        }
     }
 
     // Fallback to string matching when error type is unknown
@@ -714,33 +716,20 @@ struct ErrorDetails {
 }
 
 fn extract_error_details(err: &anyhow::Error) -> ErrorDetails {
-    let mut details = ErrorDetails::default();
+    let status = status_from_error(err);
+    let endpoint = endpoint_from_error(err);
+    let context = err
+        .chain()
+        .map(|cause| cause.to_string())
+        .find(|value| !value.trim().is_empty())
+        .map(|value| truncate_context(&value))
+        .unwrap_or_else(|| truncate_context(&err.to_string()));
 
-    for cause in err.chain() {
-        if details.status.is_none() {
-            if let Some(api_err) = cause.downcast_ref::<GithubApiError>() {
-                details.status = Some(api_err.status_code());
-                details.endpoint = Some(api_err.endpoint().to_string());
-            }
-        }
-
-        if details.status.is_none() {
-            if let Some(http_err) = cause.downcast_ref::<HttpStatusError>() {
-                details.status = Some(http_err.status);
-            }
-        }
-
-        if details.context.is_none() {
-            let context = cause.to_string();
-            details.context = Some(truncate_context(&context));
-        }
+    ErrorDetails {
+        status,
+        endpoint,
+        context: Some(context),
     }
-
-    if details.context.is_none() {
-        details.context = Some(truncate_context(&err.to_string()));
-    }
-
-    details
 }
 
 fn truncate_context(value: &str) -> String {
@@ -752,6 +741,58 @@ fn truncate_context(value: &str) -> String {
         truncated.push('…');
     }
     truncated
+}
+
+fn status_from_error(err: &anyhow::Error) -> Option<StatusCode> {
+    for cause in err.chain() {
+        if let Some(api_err) = cause.downcast_ref::<GithubApiError>() {
+            return Some(api_err.status_code());
+        }
+        if let Some(http_err) = cause.downcast_ref::<HttpStatusError>() {
+            return Some(http_err.status);
+        }
+    }
+
+    err.chain()
+        .filter_map(|cause| parse_status_from_message(&cause.to_string()))
+        .next()
+        .or_else(|| parse_status_from_message(&err.to_string()))
+}
+
+fn endpoint_from_error(err: &anyhow::Error) -> Option<String> {
+    for cause in err.chain() {
+        if let Some(api_err) = cause.downcast_ref::<GithubApiError>() {
+            return Some(api_err.endpoint().to_string());
+        }
+        if let Some(endpoint) = parse_endpoint_from_message(&cause.to_string()) {
+            return Some(endpoint);
+        }
+    }
+
+    parse_endpoint_from_message(&err.to_string())
+}
+
+fn parse_status_from_message(message: &str) -> Option<StatusCode> {
+    for part in message.split(|ch: char| !ch.is_ascii_digit()) {
+        if part.len() == 3 {
+            if let Ok(code) = part.parse::<u16>() {
+                if let Ok(status) = StatusCode::from_u16(code) {
+                    return Some(status);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn parse_endpoint_from_message(message: &str) -> Option<String> {
+    if let Some(idx) = message.rfind(" for ") {
+        let endpoint = message[idx + 5..].trim_matches(|ch: char| ch == '"' || ch.is_whitespace());
+        if !endpoint.is_empty() {
+            return Some(endpoint.to_string());
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -788,5 +829,30 @@ mod tests {
             "repos/foo/bar/issues",
         ));
         assert!(!is_permanent_error(&err));
+    }
+
+    #[test]
+    fn extract_error_details_captures_status_from_http_error() {
+        let err = anyhow::Error::new(HttpStatusError::new(StatusCode::NOT_FOUND));
+        let details = extract_error_details(&err);
+        assert_eq!(details.status, Some(StatusCode::NOT_FOUND));
+        assert_eq!(details.endpoint, None);
+    }
+
+    #[test]
+    fn extract_error_details_captures_endpoint_from_github_error() {
+        let err = anyhow::Error::new(GithubApiError::status(
+            StatusCode::NOT_FOUND,
+            "users/example",
+        ));
+        let details = extract_error_details(&err);
+        assert_eq!(details.status, Some(StatusCode::NOT_FOUND));
+        assert_eq!(details.endpoint.as_deref(), Some("users/example"));
+    }
+
+    #[test]
+    fn status_from_error_handles_plain_text_message() {
+        let err = anyhow::anyhow!("unexpected status 404 Not Found");
+        assert_eq!(status_from_error(&err), Some(StatusCode::NOT_FOUND));
     }
 }
