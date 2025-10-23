@@ -506,10 +506,24 @@ async fn process_work(inner: Arc<Inner>, budget: Budget, work: WorkItem) {
                 break;
             }
             Err(err) => {
-                if attempt >= 5 {
+                // Do not retry on most 4xx client errors (e.g., 404 Not Found),
+                // except for 403/429 which may be rate/permission related.
+                let mut retry_allowed = true;
+                if let Some(http) = err.downcast_ref::<HttpStatusError>() {
+                    let status = http.status;
+                    if status.is_client_error()
+                        && status != StatusCode::FORBIDDEN
+                        && status != StatusCode::TOO_MANY_REQUESTS
+                    {
+                        retry_allowed = false;
+                    }
+                }
+
+                if !retry_allowed || attempt >= 5 {
                     inner.finish(key, Err(err)).await;
                     break;
                 }
+
                 warn!(
                     attempt,
                     budget = ?budget,
