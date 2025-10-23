@@ -10,7 +10,7 @@ token_secrets = ""
 interval_secs = 30
 page_size = 100
 run_once = false
-fetch_mode = "rest"
+fetch_mode = "hybrid"
 
 [broker]
 max_inflight = 32

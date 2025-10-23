@@ -128,7 +128,7 @@ pub enum FetchMode {
 
 impl Default for FetchMode {
     fn default() -> Self {
-        Self::Rest
+        Self::Hybrid
     }
 }
 
@@ -274,9 +274,9 @@ mod tests {
     }
 
     #[test]
-    fn fetch_mode_defaults_to_rest() {
+    fn fetch_mode_defaults_to_hybrid() {
         let wrapper: ModeWrapper = serde_json::from_str("{}").unwrap();
-        assert_eq!(wrapper.mode, FetchMode::Rest);
+        assert_eq!(wrapper.mode, FetchMode::Hybrid);
     }
 
     #[test]
