@@ -79,6 +79,7 @@ fn test_config() -> CollectorConfig {
         interval_secs: 1,
         run_once: true,
         fetch_mode: FetchMode::Rest,
+        max_concurrent_repos: 2,
     }
 }
 

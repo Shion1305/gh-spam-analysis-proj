@@ -2,7 +2,7 @@
 url = "postgresql://postgres:postgres@localhost:5432/github_spam"
 
 [github]
-user_agent = "github-spam-lab"
+user_agent = "generic-http-client"
 token_ids = ""
 token_secrets = ""
 
@@ -11,6 +11,7 @@ interval_secs = 30
 page_size = 100
 run_once = false
 fetch_mode = "hybrid"
+max_concurrent_repos = 4
 
 [broker]
 max_inflight = 32

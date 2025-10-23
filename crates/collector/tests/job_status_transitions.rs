@@ -94,6 +94,7 @@ fn cfg() -> CollectorConfig {
         interval_secs: 1,
         run_once: true,
         fetch_mode: FetchMode::Hybrid,
+        max_concurrent_repos: 2,
     }
 }
 

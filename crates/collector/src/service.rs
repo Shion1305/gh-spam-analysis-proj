@@ -93,9 +93,9 @@ impl Collector {
         metrics::SEED_REPOS.set(pending_jobs.len() as i64);
         info!(count = pending_jobs.len(), "loaded pending collection jobs");
         let rule_version = RuleEngine::default().version().to_string();
-        let mut session_counts = HashMap::new();
-        let mut dedupe_counts = HashMap::new();
-        let mut repo_errors = 0u64;
+        let repo_errors = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(self.config.max_concurrent_repos.max(1)));
+        let mut join_set = tokio::task::JoinSet::new();
 
         for job in pending_jobs {
             // Mark job as in progress
@@ -117,189 +117,97 @@ impl Collector {
             metrics::REPO_LAST_ATTEMPT_TIMESTAMP
                 .with_label_values(&[&job.full_name])
                 .set(Utc::now().timestamp());
+            let semaphore = semaphore.clone();
+            let fetcher = self.fetcher.clone();
+            let repos = self.repos.clone();
+            let rule_version = rule_version.clone();
+            let repo_errors = repo_errors.clone();
+            let config_clone = self.config.clone();
+            join_set.spawn(async move {
+                let _permit = semaphore.acquire_owned().await.unwrap();
 
-            let repo_started = Instant::now();
-            let seed = SeedRepo {
-                owner: job.owner.clone(),
-                name: job.name.clone(),
-            };
+                let repo_started = Instant::now();
+                let seed = SeedRepo {
+                    owner: job.owner.clone(),
+                    name: job.name.clone(),
+                };
 
-            match self
-                .process_repo(
-                    &seed,
-                    &rule_version,
-                    &mut session_counts,
-                    &mut dedupe_counts,
-                )
-                .await
-            {
-                Ok(_) => {
-                    metrics::REPOS_PROCESSED_TOTAL
-                        .with_label_values(&["success"])
-                        .inc();
-                    metrics::REPO_DURATION
-                        .with_label_values(&["success"])
-                        .observe(repo_started.elapsed().as_secs_f64());
+                // Per-task counters
+                let mut session_counts = HashMap::new();
+                let mut dedupe_counts = HashMap::new();
+                let c = Collector { config: config_clone, fetcher: fetcher.clone(), repos: repos.clone() };
+                let result = c
+                    .process_repo(&seed, &rule_version, &mut session_counts, &mut dedupe_counts)
+                    .await;
 
-                    // Mark job as completed
-                    if let Err(err) = self
-                        .repos
-                        .collection_jobs()
-                        .update(CollectionJobUpdate {
-                            id: job.id,
-                            status: CollectionStatus::Completed,
-                            error_message: None,
-                        })
-                        .await
-                    {
-                        warn!(job_id = job.id, error = ?err, "failed to mark job as completed");
-                    } else {
-                        // Update metrics for successful completion
-                        metrics::REPO_JOB_STATUS
-                            .with_label_values(&[&job.full_name, "completed"])
-                            .set(1);
-                        metrics::REPO_JOB_STATUS
-                            .with_label_values(&[&job.full_name, "pending"])
-                            .set(0);
-                        metrics::REPO_JOB_STATUS
-                            .with_label_values(&[&job.full_name, "in_progress"])
-                            .set(0);
-                        metrics::REPO_JOB_STATUS
-                            .with_label_values(&[&job.full_name, "failed"])
-                            .set(0);
-                        metrics::REPO_JOB_STATUS
-                            .with_label_values(&[&job.full_name, "error"])
-                            .set(0);
-                        metrics::REPO_JOB_FAILURE_COUNT
-                            .with_label_values(&[&job.full_name])
-                            .set(0);
-                        metrics::REPO_LAST_SUCCESS_TIMESTAMP
-                            .with_label_values(&[&job.full_name])
-                            .set(Utc::now().timestamp());
-                    }
-                }
-                Err(err) => {
-                    repo_errors = repo_errors.saturating_add(1);
-                    metrics::RUN_ERRORS_TOTAL.inc();
-                    metrics::REPOS_PROCESSED_TOTAL
-                        .with_label_values(&["error"])
-                        .inc();
-                    metrics::REPO_DURATION
-                        .with_label_values(&["error"])
-                        .observe(repo_started.elapsed().as_secs_f64());
-
-                    let error_details = extract_error_details(&err);
-
-                    // Determine if this is a permanent error or a transient failure
-                    let status = if is_permanent_error(&err) {
-                        warn!(
-                            job_id = job.id,
-                            owner = %seed.owner,
-                            repo = %seed.name,
-                            error = ?err,
-                            attempt = job.failure_count + 1,
-                            status_code = error_details
-                                .status
-                                .map(|status| status.as_u16()),
-                            endpoint = error_details
-                                .endpoint
-                                .as_deref()
-                                .unwrap_or("-"),
-                            context = error_details
-                                .context
-                                .as_deref()
-                                .unwrap_or("-"),
-                            "permanent error - will not retry"
-                        );
-                        CollectionStatus::Error
-                    } else {
-                        warn!(
-                            job_id = job.id,
-                            owner = %seed.owner,
-                            repo = %seed.name,
-                            error = ?err,
-                            attempt = job.failure_count + 1,
-                            status_code = error_details
-                                .status
-                                .map(|status| status.as_u16()),
-                            endpoint = error_details
-                                .endpoint
-                                .as_deref()
-                                .unwrap_or("-"),
-                            context = error_details
-                                .context
-                                .as_deref()
-                                .unwrap_or("-"),
-                            "transient failure - will retry"
-                        );
-                        CollectionStatus::Failed
-                    };
-                    let error_message = err.to_string();
-
-                    // Mark job with appropriate status
-                    if let Err(update_err) = self
-                        .repos
-                        .collection_jobs()
-                        .update(CollectionJobUpdate {
-                            id: job.id,
-                            status: status.clone(),
-                            error_message: Some(error_message),
-                        })
-                        .await
-                    {
-                        warn!(job_id = job.id, error = ?update_err, "failed to update job status");
-                    } else {
-                        // Update metrics based on status
-                        match status {
-                            CollectionStatus::Error => {
-                                // Permanent error - stays in error state, won't retry
-                                metrics::REPO_JOB_STATUS
-                                    .with_label_values(&[&job.full_name, "error"])
-                                    .set(1);
-                                metrics::REPO_JOB_STATUS
-                                    .with_label_values(&[&job.full_name, "pending"])
-                                    .set(0);
-                                metrics::REPO_JOB_STATUS
-                                    .with_label_values(&[&job.full_name, "completed"])
-                                    .set(0);
-                                metrics::REPO_JOB_STATUS
-                                    .with_label_values(&[&job.full_name, "in_progress"])
-                                    .set(0);
-                                metrics::REPO_JOB_STATUS
-                                    .with_label_values(&[&job.full_name, "failed"])
-                                    .set(0);
-                                metrics::REPO_JOB_FAILURE_COUNT
-                                    .with_label_values(&[&job.full_name])
-                                    .set((job.failure_count + 1) as i64);
-                            }
-                            CollectionStatus::Failed => {
-                                // Transient failure - returns to pending for retry
-                                metrics::REPO_JOB_STATUS
-                                    .with_label_values(&[&job.full_name, "pending"])
-                                    .set(1);
-                                metrics::REPO_JOB_STATUS
-                                    .with_label_values(&[&job.full_name, "completed"])
-                                    .set(0);
-                                metrics::REPO_JOB_STATUS
-                                    .with_label_values(&[&job.full_name, "in_progress"])
-                                    .set(0);
-                                metrics::REPO_JOB_STATUS
-                                    .with_label_values(&[&job.full_name, "failed"])
-                                    .set(1);
-                                metrics::REPO_JOB_STATUS
-                                    .with_label_values(&[&job.full_name, "error"])
-                                    .set(0);
-                                metrics::REPO_JOB_FAILURE_COUNT
-                                    .with_label_values(&[&job.full_name])
-                                    .set((job.failure_count + 1) as i64);
-                            }
-                            _ => {}
+                match result {
+                    Ok(_) => {
+                        metrics::REPOS_PROCESSED_TOTAL
+                            .with_label_values(&["success"])
+                            .inc();
+                        metrics::REPO_DURATION
+                            .with_label_values(&["success"])
+                            .observe(repo_started.elapsed().as_secs_f64());
+                        if let Err(err) = repos
+                            .collection_jobs()
+                            .update(CollectionJobUpdate { id: job.id, status: CollectionStatus::Completed, error_message: None })
+                            .await
+                        {
+                            warn!(job_id = job.id, error = ?err, "failed to mark job as completed");
+                        } else {
+                            metrics::REPO_JOB_STATUS.with_label_values(&[&job.full_name, "completed"]).set(1);
+                            metrics::REPO_JOB_STATUS.with_label_values(&[&job.full_name, "pending"]).set(0);
+                            metrics::REPO_JOB_STATUS.with_label_values(&[&job.full_name, "in_progress"]).set(0);
+                            metrics::REPO_JOB_STATUS.with_label_values(&[&job.full_name, "failed"]).set(0);
+                            metrics::REPO_JOB_STATUS.with_label_values(&[&job.full_name, "error"]).set(0);
+                            metrics::REPO_JOB_FAILURE_COUNT.with_label_values(&[&job.full_name]).set(0);
+                            metrics::REPO_LAST_SUCCESS_TIMESTAMP.with_label_values(&[&job.full_name]).set(Utc::now().timestamp());
                         }
                     }
+                    Err(err) => {
+                        repo_errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        metrics::RUN_ERRORS_TOTAL.inc();
+                        metrics::REPOS_PROCESSED_TOTAL.with_label_values(&["error"]).inc();
+                        metrics::REPO_DURATION.with_label_values(&["error"]).observe(repo_started.elapsed().as_secs_f64());
+
+                        let error_details = extract_error_details(&err);
+                        let status = if is_permanent_error(&err) { CollectionStatus::Error } else { CollectionStatus::Failed };
+                        let error_message = err.to_string();
+                        if let Err(update_err) = repos
+                            .collection_jobs()
+                            .update(CollectionJobUpdate { id: job.id, status: status.clone(), error_message: Some(error_message) })
+                            .await
+                        {
+                            warn!(job_id = job.id, error = ?update_err, "failed to update job status");
+                        } else {
+                            match status {
+                                CollectionStatus::Error => {
+                                    metrics::REPO_JOB_STATUS.with_label_values(&[&job.full_name, "error"]).set(1);
+                                    metrics::REPO_JOB_STATUS.with_label_values(&[&job.full_name, "pending"]).set(0);
+                                    metrics::REPO_JOB_STATUS.with_label_values(&[&job.full_name, "completed"]).set(0);
+                                    metrics::REPO_JOB_STATUS.with_label_values(&[&job.full_name, "in_progress"]).set(0);
+                                    metrics::REPO_JOB_STATUS.with_label_values(&[&job.full_name, "failed"]).set(0);
+                                    metrics::REPO_JOB_FAILURE_COUNT.with_label_values(&[&job.full_name]).set((job.failure_count + 1) as i64);
+                                }
+                                CollectionStatus::Failed => {
+                                    metrics::REPO_JOB_STATUS.with_label_values(&[&job.full_name, "pending"]).set(1);
+                                    metrics::REPO_JOB_STATUS.with_label_values(&[&job.full_name, "completed"]).set(0);
+                                    metrics::REPO_JOB_STATUS.with_label_values(&[&job.full_name, "in_progress"]).set(0);
+                                    metrics::REPO_JOB_STATUS.with_label_values(&[&job.full_name, "failed"]).set(1);
+                                    metrics::REPO_JOB_STATUS.with_label_values(&[&job.full_name, "error"]).set(0);
+                                    metrics::REPO_JOB_FAILURE_COUNT.with_label_values(&[&job.full_name]).set((job.failure_count + 1) as i64);
+                                }
+                                _ => {}
+                            }
+                        }
+                        warn!(job_id = job.id, owner = %seed.owner, repo = %seed.name, error = ?err, status_code = error_details.status.map(|s| s.as_u16()), endpoint = error_details.endpoint.as_deref().unwrap_or("-"), context = error_details.context.as_deref().unwrap_or("-"), "job failed");
+                    }
                 }
-            }
+            });
         }
-        if repo_errors == 0 {
+        while join_set.join_next().await.is_some() {}
+
+        if repo_errors.load(std::sync::atomic::Ordering::Relaxed) == 0 {
             metrics::RUN_SUCCESSES_TOTAL.inc();
             metrics::LAST_SUCCESS_TIMESTAMP.set(Utc::now().timestamp());
         } else {

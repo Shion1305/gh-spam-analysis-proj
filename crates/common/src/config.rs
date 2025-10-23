@@ -106,6 +106,8 @@ pub struct CollectorConfig {
     pub run_once: bool,
     #[serde(default)]
     pub fetch_mode: FetchMode,
+    #[serde(default = "CollectorConfig::default_max_concurrent_repos")]
+    pub max_concurrent_repos: usize,
 }
 
 impl CollectorConfig {
@@ -115,6 +117,10 @@ impl CollectorConfig {
 
     const fn default_page_size() -> u32 {
         100
+    }
+
+    const fn default_max_concurrent_repos() -> usize {
+        4
     }
 }
 
