@@ -529,7 +529,10 @@ async fn process_work(inner: Arc<Inner>, budget: Budget, work: WorkItem) {
                 if !retry_allowed || attempt >= 5 {
                     inner.finish(key, Err(err)).await;
                     metrics::PENDING
-                        .with_label_values(&[budget_label(budget), priority_label(request.priority)])
+                        .with_label_values(&[
+                            budget_label(budget),
+                            priority_label(request.priority),
+                        ])
                         .dec();
                     break;
                 }
@@ -682,7 +685,8 @@ async fn execute_once(
                     .await;
 
                 // Refresh per-token gauges after consumption (GraphQL cost may not include headers)
-                if let Some((limit, remaining)) = inner.token_pool.get_numbers(budget, &token.id).await
+                if let Some((limit, remaining)) =
+                    inner.token_pool.get_numbers(budget, &token.id).await
                 {
                     metrics::RATE_LIMIT
                         .with_label_values(&[&token.id, budget_label(budget)])
