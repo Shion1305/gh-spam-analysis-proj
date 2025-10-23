@@ -10,9 +10,11 @@ use normalizer::models::{
 use normalizer::payloads::UserRef;
 
 pub mod graphql;
+pub mod hybrid;
 pub mod rest;
 
 pub use graphql::GraphqlDataFetcher;
+pub use hybrid::HybridDataFetcher;
 pub use rest::RestDataFetcher;
 
 #[async_trait]

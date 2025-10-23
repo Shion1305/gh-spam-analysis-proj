@@ -94,7 +94,9 @@ impl Collector {
         info!(count = pending_jobs.len(), "loaded pending collection jobs");
         let rule_version = RuleEngine::default().version().to_string();
         let repo_errors = Arc::new(std::sync::atomic::AtomicU64::new(0));
-        let semaphore = Arc::new(tokio::sync::Semaphore::new(self.config.max_concurrent_repos.max(1)));
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(
+            self.config.max_concurrent_repos.max(1),
+        ));
         let mut join_set = tokio::task::JoinSet::new();
 
         for job in pending_jobs {

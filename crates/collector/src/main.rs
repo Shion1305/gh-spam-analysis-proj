@@ -75,7 +75,12 @@ async fn main() -> Result<()> {
     ));
     let fetcher: Arc<dyn DataFetcher> = match config.collector.fetch_mode {
         FetchMode::Rest => Arc::new(RestDataFetcher::new(client.clone())),
-        FetchMode::Graphql | FetchMode::Hybrid => Arc::new(GraphqlDataFetcher::new(
+        FetchMode::Graphql => Arc::new(GraphqlDataFetcher::new(
+            broker.clone(),
+            client.clone(),
+            config.github.user_agent.clone(),
+        )),
+        FetchMode::Hybrid => Arc::new(collector::fetcher::HybridDataFetcher::new(
             broker.clone(),
             client.clone(),
             config.github.user_agent.clone(),
