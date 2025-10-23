@@ -49,6 +49,18 @@ pub static RATE_LIMIT: Lazy<IntGaugeVec> = Lazy::new(|| {
     .expect("rate limit")
 });
 
+// Outstanding broker work (queued + in-flight) per budget and priority.
+// Increments when a request is dispatched; decrements when the request completes
+// (success or final error after retries).
+pub static PENDING: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "gh_broker_pending_requests",
+        "Outstanding broker work (queued + in-flight) per budget and priority",
+        &["budget", "priority"]
+    )
+    .expect("pending work gauge")
+});
+
 // Aggregated capacity across all tokens per budget (e.g., REST/Core vs GraphQL)
 pub static BUDGET_LIMIT_TOTAL: Lazy<IntGaugeVec> = Lazy::new(|| {
     register_int_gauge_vec!(

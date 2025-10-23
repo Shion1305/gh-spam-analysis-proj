@@ -332,6 +332,9 @@ impl LocalGithubBroker {
             metrics::QUEUE_LENGTH
                 .with_label_values(&[budget_label(budget), priority_label(priority)])
                 .inc();
+            metrics::PENDING
+                .with_label_values(&[budget_label(budget), priority_label(priority)])
+                .inc();
             sender
                 .send(work)
                 .await
@@ -503,6 +506,10 @@ async fn process_work(inner: Arc<Inner>, budget: Budget, work: WorkItem) {
         match execute_once(inner.clone(), budget, &work.cached, request.clone()).await {
             Ok(response) => {
                 inner.finish(key, Ok(response)).await;
+                // Decrement pending on completion
+                metrics::PENDING
+                    .with_label_values(&[budget_label(budget), priority_label(request.priority)])
+                    .dec();
                 break;
             }
             Err(err) => {
@@ -521,6 +528,9 @@ async fn process_work(inner: Arc<Inner>, budget: Budget, work: WorkItem) {
 
                 if !retry_allowed || attempt >= 5 {
                     inner.finish(key, Err(err)).await;
+                    metrics::PENDING
+                        .with_label_values(&[budget_label(budget), priority_label(request.priority)])
+                        .dec();
                     break;
                 }
 
