@@ -96,7 +96,7 @@ github-spam-lab/
    ```bash
    just format                  # cargo fmt
    just check                   # cargo fmt --check + cargo clippy -D warnings (uses SQLX_OFFLINE)
-   just test                    # cargo nextest run (spins up a test Postgres container)
+   just test                    # cargo nextest run (spins up a test Postgres container and auto-stops it)
    just test-unit               # cargo nextest run --lib
    just test-integration        # cargo nextest run --tests
    ```
@@ -112,6 +112,8 @@ github-spam-lab/
 
 2. **Collector (`collector`)**
    - Seeds work from the `collection_jobs` table (create via API `POST /repos`).
+   - Fetch modes (`collector.fetch_mode`): `rest` | `graphql` | `hybrid` (default: `hybrid`).
+     - Hybrid: uses GraphQL for repositories, issues, and comments; falls back to REST for users that aren’t present in GraphQL responses.
    - Fetches issues (state=all, sorted by `updated`), uses watermarks to stop early.
    - Upserts repositories/issues/comments/users via `db` crate.
    - Memoizes user lookups and updates `collector_watermarks`.
@@ -162,18 +164,24 @@ github-spam-lab/
 
 ## Observability & Ops
 
-- Prometheus metrics from broker & API (`/metrics`), including queue lengths, rate limits, retry counts, latency histograms.
-- Docker compose stack under `docker/obs/` bundles Prometheus + Grafana with a starter dashboard covering:
-  - Per-budget remaining/limit per token
-  - Queue lengths by priority
-  - Request rate/error/retry counts
-  - P95 latency
-  - Cache hit ratio
+- Prometheus metrics from broker, collector, and API (`/metrics`). Highlights:
+  - Broker per-token and aggregated capacities by budget (REST/Core vs GraphQL):
+    - `gh_broker_rate_limit{token,budget}`, `gh_broker_rate_remaining{token,budget}`
+    - `gh_broker_budget_limit_total{budget}`, `gh_broker_budget_remaining_total{budget}`
+  - Fetcher metrics split by backend and operation:
+    - `collector_fetch_requests_total{fetcher,op,outcome}`
+    - `collector_fetch_items_total{fetcher,op}`
+    - `collector_fetch_latency_seconds_bucket{fetcher,op}`
+  - Collector run/job gauges and histograms (runs, in-progress repos, last success/attempt, P95 repo duration, throughput).
+- Docker compose stack under `docker/obs/` bundles Prometheus + Grafana with a dashboard covering:
+  - REST vs GraphQL budget remaining and utilization
+  - Queue lengths by priority; request rate/error/retries; P95 latency; cache hit ratio
+  - Issues/sec, Comments/sec; Jobs status (pending/in_progress/completed/failed/error)
 - Logs: `tracing` with env-driven filters (`RUST_LOG`), structured JSON logging optional.
 
 ## Continuous Integration & Release
 
-- `.github/workflows/ci.yml` runs fmt, clippy (`-D warnings`), and `cargo nextest` against a Postgres service launched via Docker Compose. The workflow relies on the application's built-in migrations, so schema drift is caught automatically.
+- `.github/workflows/ci.yml` runs fmt, clippy (`-D warnings`), and `cargo nextest` against a Postgres service launched via Docker Compose. The workflow relies on the application's built-in migrations, so schema drift is caught automatically. The workflow uses `dtolnay/rust-toolchain@stable` and `Swatinem/rust-cache@v2`.
 - `.github/workflows/helm-publish.yml` packages `charts/github-spam-lab` and publishes an OCI chart to `ghcr.io/<owner>/charts`. The same workflow attaches the `.tgz` as a build artifact for manual download.
 - Set `DATABASE_URL`/`TEST_ADMIN_URL` secrets in self-hosted runners if you customize database credentials.
 
