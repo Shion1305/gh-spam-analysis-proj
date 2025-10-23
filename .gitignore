@@ -12,3 +12,5 @@ target/
 .sqlx/*.json
 .env*
 !.env.example
+logs.txt
+*.log
