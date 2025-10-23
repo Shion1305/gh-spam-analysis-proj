@@ -18,22 +18,13 @@ jobs:
       - name: Start PostgreSQL
         run: docker compose -f docker/docker-compose.yml up -d postgres
       - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          override: true
           components: rustfmt, clippy
       - name: Cache cargo
-        uses: actions/cache@v3
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/bin
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install nextest
         uses: taiki-e/install-action@v2
         with:
