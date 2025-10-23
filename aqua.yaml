@@ -1,4 +1,15 @@
-aqua_version: v1.37.1
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/aquaproj/aqua/main/json-schema/aqua-yaml.json
+# aqua - Declarative CLI Version Manager
+# https://aquaproj.github.io/
+# checksum:
+#   enabled: true
+#   require_checksum: true
+#   supported_envs:
+#   - all
+registries:
+- type: standard
+  ref: v4.428.0  # renovate: depName=aquaproj/aqua-registry
 packages:
   - name: casey/just@v1.23.0
   - name: launchbadge/sqlx-cli@v0.7.3
