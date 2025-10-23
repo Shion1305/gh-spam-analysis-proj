@@ -106,6 +106,8 @@ pub struct CollectorConfig {
     pub run_once: bool,
     #[serde(default = "CollectorConfig::default_seed_path")]
     pub seed_repos_path: String,
+    #[serde(default)]
+    pub fetch_mode: FetchMode,
 }
 
 impl CollectorConfig {
@@ -119,6 +121,20 @@ impl CollectorConfig {
 
     fn default_seed_path() -> String {
         "scripts/seed_repos.json".to_string()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum FetchMode {
+    Rest,
+    Graphql,
+    Hybrid,
+}
+
+impl Default for FetchMode {
+    fn default() -> Self {
+        Self::Rest
     }
 }
 
@@ -256,6 +272,24 @@ where
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[derive(Deserialize)]
+    struct ModeWrapper {
+        #[serde(default)]
+        mode: FetchMode,
+    }
+
+    #[test]
+    fn fetch_mode_defaults_to_rest() {
+        let wrapper: ModeWrapper = serde_json::from_str("{}").unwrap();
+        assert_eq!(wrapper.mode, FetchMode::Rest);
+    }
+
+    #[test]
+    fn fetch_mode_parses_variants() {
+        let wrapper: ModeWrapper = serde_json::from_str("{\"mode\":\"graphql\"}").unwrap();
+        assert_eq!(wrapper.mode, FetchMode::Graphql);
+    }
 
     #[test]
     fn github_config_parses_csv_tokens() {
