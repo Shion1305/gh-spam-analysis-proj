@@ -32,11 +32,12 @@ impl SleepyFetcher {
     }
 
     fn inc(&self) {
-        let cur = self.active.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        let cur = self
+            .active
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            + 1;
         loop {
-            let max = self
-                .max_active
-                .load(std::sync::atomic::Ordering::Relaxed);
+            let max = self.max_active.load(std::sync::atomic::Ordering::Relaxed);
             if cur <= max {
                 break;
             }
@@ -56,7 +57,8 @@ impl SleepyFetcher {
     }
 
     fn dec(&self) {
-        self.active.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        self.active
+            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -87,7 +89,10 @@ impl DataFetcher for SleepyFetcher {
         _cursor: Option<String>,
         _per_page: u32,
     ) -> Result<IssuePage> {
-        Ok(IssuePage { items: vec![], next_cursor: None })
+        Ok(IssuePage {
+            items: vec![],
+            next_cursor: None,
+        })
     }
 
     async fn fetch_issue_comments(
@@ -99,11 +104,18 @@ impl DataFetcher for SleepyFetcher {
         _cursor: Option<String>,
         _per_page: u32,
     ) -> Result<CommentPage> {
-        Ok(CommentPage { items: vec![], next_cursor: None })
+        Ok(CommentPage {
+            items: vec![],
+            next_cursor: None,
+        })
     }
 
     async fn fetch_user(&self, _user: &UserRef) -> Result<UserFetch> {
-        Ok(UserFetch::Missing(collector::fetcher::MissingUser { id: 0, login: "ghost".into(), status: None }))
+        Ok(UserFetch::Missing(collector::fetcher::MissingUser {
+            id: 0,
+            login: "ghost".into(),
+            status: None,
+        }))
     }
 }
 
@@ -123,7 +135,11 @@ async fn processes_repositories_in_parallel() -> Result<()> {
     // Create 3 jobs
     for i in 0..3 {
         db.collection_jobs()
-            .create(CollectionJobCreate { owner: format!("o{i}"), name: format!("r{i}"), priority: 0 })
+            .create(CollectionJobCreate {
+                owner: format!("o{i}"),
+                name: format!("r{i}"),
+                priority: 0,
+            })
             .await?;
     }
 
@@ -146,11 +162,18 @@ async fn processes_repositories_in_parallel() -> Result<()> {
         .load(std::sync::atomic::Ordering::Relaxed);
 
     // With 3 jobs, 250ms each, concurrency=2: expect < 600ms and >= 250ms, and at least 2 in-flight.
-    assert!(max_active >= 2, "expected >=2 concurrent, got {}", max_active);
+    assert!(
+        max_active >= 2,
+        "expected >=2 concurrent, got {}",
+        max_active
+    );
     assert!(elapsed.as_millis() < 600, "took too long: {:?}", elapsed);
-    assert!(elapsed.as_millis() >= 250, "too fast (unexpected): {:?}", elapsed);
+    assert!(
+        elapsed.as_millis() >= 250,
+        "too fast (unexpected): {:?}",
+        elapsed
+    );
 
     handle.cleanup().await?;
     Ok(())
 }
-
