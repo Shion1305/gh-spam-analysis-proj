@@ -832,6 +832,24 @@ mod tests {
     }
 
     #[test]
+    fn user_not_found_is_transient() {
+        let err = anyhow::Error::new(GithubApiError::status(
+            StatusCode::NOT_FOUND,
+            "users/someone",
+        ));
+        assert!(!is_permanent_error(&err));
+    }
+
+    #[test]
+    fn comment_not_found_is_transient() {
+        let err = anyhow::Error::new(GithubApiError::status(
+            StatusCode::NOT_FOUND,
+            "repos/foo/bar/issues/comments",
+        ));
+        assert!(!is_permanent_error(&err));
+    }
+
+    #[test]
     fn extract_error_details_captures_status_from_http_error() {
         let err = anyhow::Error::new(HttpStatusError::new(StatusCode::NOT_FOUND));
         let details = extract_error_details(&err);
@@ -854,5 +872,13 @@ mod tests {
     fn status_from_error_handles_plain_text_message() {
         let err = anyhow::anyhow!("unexpected status 404 Not Found");
         assert_eq!(status_from_error(&err), Some(StatusCode::NOT_FOUND));
+    }
+
+    #[test]
+    fn extract_error_details_from_plain_message_recovers_endpoint() {
+        let err = anyhow::anyhow!("unexpected status 404 Not Found for users/example");
+        let details = extract_error_details(&err);
+        assert_eq!(details.status, Some(StatusCode::NOT_FOUND));
+        assert_eq!(details.endpoint.as_deref(), Some("users/example"));
     }
 }
