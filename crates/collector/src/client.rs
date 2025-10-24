@@ -168,7 +168,9 @@ impl GithubClient for BrokerGithubClient {
         page: u32,
         per_page: u32,
     ) -> Result<Vec<Value>> {
-        let mut url = self.join_segments(&["repos", owner, repo, "issues"])?.clone();
+        let mut url = self
+            .join_segments(&["repos", owner, repo, "issues"])?
+            .clone();
         let mut params = vec![
             ("state", "all".to_string()),
             ("sort", "updated".to_string()),
@@ -192,7 +194,9 @@ impl GithubClient for BrokerGithubClient {
         per_page: u32,
     ) -> Result<Vec<Value>> {
         let issue_num = issue_number.to_string();
-        let mut url = self.join_segments(&["repos", owner, repo, "issues", &issue_num, "comments"])?.clone();
+        let mut url = self
+            .join_segments(&["repos", owner, repo, "issues", &issue_num, "comments"])?
+            .clone();
         let params = [
             ("page", page.to_string()),
             ("per_page", per_page.to_string()),
