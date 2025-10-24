@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use sqlx::{postgres::PgPoolOptions, PgPool, Postgres, QueryBuilder};
+use sqlx::{postgres::PgPoolOptions, PgPool, Postgres, QueryBuilder, Row};
 use tokio::time::{sleep, Duration};
 use tracing::{instrument, warn};
 
@@ -557,7 +557,7 @@ impl SpamFlagsRepository for PgSpamFlagsRepository {
         since: Option<DateTime<Utc>>,
         limit: i64,
     ) -> Result<Vec<ActorSpamSummary>> {
-        let rows = sqlx::query!(
+        let rows = sqlx::query(
             r#"
             SELECT
                 login,
@@ -583,22 +583,39 @@ impl SpamFlagsRepository for PgSpamFlagsRepository {
             ORDER BY total_score DESC
             LIMIT $2
             "#,
-            since,
-            limit
         )
+        .bind(since)
+        .bind(limit)
         .fetch_all(&self.pool)
         .await
         .map_err(DbError::Query)?;
 
         let mut summaries = Vec::new();
         for row in rows {
-            if let Some(login) = row.login {
+            let login: Option<String> = row.try_get("login").ok();
+            if let Some(login) = login {
+                let avg_score: f64 = row
+                    .try_get::<Option<f64>, _>("avg_score")
+                    .unwrap_or(Some(0.0))
+                    .unwrap_or(0.0);
+                let total_score: f32 = row
+                    .try_get::<Option<f32>, _>("total_score")
+                    .unwrap_or(Some(0.0))
+                    .unwrap_or(0.0);
+                let flag_count: i64 = row
+                    .try_get::<Option<i64>, _>("flag_count")
+                    .unwrap_or(Some(0))
+                    .unwrap_or(0);
+                let reasons: Vec<String> = row
+                    .try_get::<Option<Vec<String>>, _>("reasons")
+                    .unwrap_or(Some(Vec::new()))
+                    .unwrap_or_default();
                 summaries.push(ActorSpamSummary {
                     login,
-                    avg_score: row.avg_score.unwrap_or_default() as f32,
-                    total_score: row.total_score.unwrap_or_default(),
-                    flag_count: row.flag_count.unwrap_or_default(),
-                    reasons: row.reasons.unwrap_or_default(),
+                    avg_score: avg_score as f32,
+                    total_score,
+                    flag_count,
+                    reasons,
                 });
             }
         }
