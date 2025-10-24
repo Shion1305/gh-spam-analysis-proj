@@ -730,11 +730,18 @@ impl DataFetcher for GraphqlDataFetcher {
             .get("issue")
             .ok_or_else(|| anyhow!("missing issue field in GraphQL response"))?;
         if issue_value.is_null() {
-            return Err(GithubApiError::status(
-                StatusCode::NOT_FOUND,
-                format!("repos/{}/{}/issues/{}", owner, name, issue_number),
-            )
-            .into());
+            // Issue not found; treat as benign skip (empty comments page)
+            metrics::FETCH_REQUESTS_TOTAL
+                .with_label_values(&["graphql", op, "success"])
+                .inc();
+            metrics::FETCH_LATENCY_SECONDS
+                .with_label_values(&["graphql", op])
+                .observe(elapsed);
+            crate::metrics::ISSUES_404_SKIPS_TOTAL.inc();
+            return Ok(CommentPage {
+                items: Vec::new(),
+                next_cursor: None,
+            });
         }
 
         let comments_conn = issue_value
@@ -791,6 +798,7 @@ impl DataFetcher for GraphqlDataFetcher {
                         metrics::FETCH_LATENCY_SECONDS
                             .with_label_values(&["graphql", op])
                             .observe(elapsed);
+                        crate::metrics::USERS_404_SKIPS_TOTAL.inc();
                         return Ok(UserFetch::Missing(MissingUser {
                             id: user.id,
                             login: user.login.clone(),
@@ -805,6 +813,7 @@ impl DataFetcher for GraphqlDataFetcher {
                         metrics::FETCH_LATENCY_SECONDS
                             .with_label_values(&["graphql", op])
                             .observe(elapsed);
+                        crate::metrics::USERS_404_SKIPS_TOTAL.inc();
                         return Ok(UserFetch::Missing(MissingUser {
                             id: user.id,
                             login: user.login.clone(),

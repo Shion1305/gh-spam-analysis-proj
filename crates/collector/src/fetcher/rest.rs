@@ -177,6 +177,7 @@ impl DataFetcher for RestDataFetcher {
                     metrics::FETCH_LATENCY_SECONDS
                         .with_label_values(&["rest", op])
                         .observe(elapsed);
+                    crate::metrics::COMMENTS_404_SKIPS_TOTAL.inc();
                     Vec::new()
                 } else {
                     metrics::FETCH_REQUESTS_TOTAL
@@ -239,6 +240,7 @@ impl DataFetcher for RestDataFetcher {
                         metrics::FETCH_LATENCY_SECONDS
                             .with_label_values(&["rest", op])
                             .observe(elapsed);
+                        crate::metrics::USERS_404_SKIPS_TOTAL.inc();
                         return Ok(UserFetch::Missing(MissingUser {
                             id: user.id,
                             login: user.login.clone(),
@@ -254,6 +256,7 @@ impl DataFetcher for RestDataFetcher {
                         metrics::FETCH_LATENCY_SECONDS
                             .with_label_values(&["rest", op])
                             .observe(elapsed);
+                        crate::metrics::USERS_404_SKIPS_TOTAL.inc();
                         return Ok(UserFetch::Missing(MissingUser {
                             id: user.id,
                             login: user.login.clone(),
@@ -268,6 +271,7 @@ impl DataFetcher for RestDataFetcher {
                         metrics::FETCH_LATENCY_SECONDS
                             .with_label_values(&["rest", op])
                             .observe(elapsed);
+                        crate::metrics::USERS_404_SKIPS_TOTAL.inc();
                         return Ok(UserFetch::Missing(MissingUser {
                             id: user.id,
                             login: user.login.clone(),

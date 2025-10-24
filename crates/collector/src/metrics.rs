@@ -197,6 +197,31 @@ pub static FETCH_LATENCY_SECONDS: Lazy<HistogramVec> = Lazy::new(|| {
     .expect("collector fetch latency seconds")
 });
 
+// Skips: track benign 404s that are intentionally treated as non-fatal
+pub static COMMENTS_404_SKIPS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    register_int_counter!(
+        "comments_404_skips_total",
+        "Number of comment fetches skipped due to 404 Not Found"
+    )
+    .expect("comments 404 skips total")
+});
+
+pub static ISSUES_404_SKIPS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    register_int_counter!(
+        "issues_404_skips_total",
+        "Number of issue fetches skipped due to 404 Not Found"
+    )
+    .expect("issues 404 skips total")
+});
+
+pub static USERS_404_SKIPS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    register_int_counter!(
+        "users_404_skips_total",
+        "Number of user fetches skipped due to 404 Not Found"
+    )
+    .expect("users 404 skips total")
+});
+
 pub struct ActiveRepoGuard;
 
 impl Default for ActiveRepoGuard {
