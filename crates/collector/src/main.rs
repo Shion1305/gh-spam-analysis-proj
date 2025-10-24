@@ -91,12 +91,11 @@ async fn main() -> Result<()> {
     let database = Arc::new(PgDatabase::connect(&config.database.url).await?);
     let repositories: Arc<dyn Repositories> = database.clone() as Arc<dyn Repositories>;
 
-    let collector = Collector::new(
-        config.collector.clone(),
-        fetcher,
-        repositories,
-        config.collector.max_concurrent_repos,
-    );
+    let max_repos = std::env::var("COLLECTOR__MAX_CONCURRENT_REPOS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(4);
+    let collector = Collector::new(config.collector.clone(), fetcher, repositories, max_repos);
     info!(
         interval = config.collector.interval_secs,
         "collector started"
