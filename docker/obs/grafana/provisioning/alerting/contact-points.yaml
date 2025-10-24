@@ -1,0 +1,15 @@
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: discord
+    receivers:
+      - uid: discord
+        type: discord
+        disableResolveMessage: false
+        settings:
+          url: ${ALERT_DISCORD_WEBHOOK_URL}
+          use_discord_username: true
+          username: "GitHub Spam Lab Alerts"
+          icon_emoji: ":rotating_light:"
+

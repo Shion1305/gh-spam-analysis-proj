@@ -78,16 +78,19 @@ services:
 
   grafana:
     image: grafana/grafana:10.2.0
+    env_file: .env
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: 'true'
       GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
       GF_AUTH_DISABLE_LOGIN_FORM: 'true'
+      ALERT_DISCORD_WEBHOOK_URL: ${ALERT_DISCORD_WEBHOOK_URL}
     ports:
       - "3100:3000"
     volumes:
       - ./obs/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
       - ./obs/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
       - ./obs/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./obs/grafana/provisioning/alerting:/etc/grafana/provisioning/alerting:ro
     depends_on:
       prometheus:
         condition: service_started
