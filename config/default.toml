@@ -10,7 +10,7 @@ token_secrets = ""
 interval_secs = 30
 page_size = 100
 run_once = false
-fetch_mode = "hybrid"
+fetch_mode = "graphql"
 max_concurrent_repos = 4
 
 [broker]
