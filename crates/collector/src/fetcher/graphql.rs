@@ -788,6 +788,20 @@ impl DataFetcher for GraphqlDataFetcher {
                             status: Some(api_err.status_code()),
                         }));
                     }
+                } else if let Some(http_status) = err.downcast_ref::<gh_broker::HttpStatusError>() {
+                    if http_status.status == StatusCode::NOT_FOUND {
+                        metrics::FETCH_REQUESTS_TOTAL
+                            .with_label_values(&["graphql", op, "success"])
+                            .inc();
+                        metrics::FETCH_LATENCY_SECONDS
+                            .with_label_values(&["graphql", op])
+                            .observe(elapsed);
+                        return Ok(UserFetch::Missing(MissingUser {
+                            id: user.id,
+                            login: user.login.clone(),
+                            status: Some(http_status.status),
+                        }));
+                    }
                 }
                 metrics::FETCH_REQUESTS_TOTAL
                     .with_label_values(&["graphql", op, "error"])

@@ -226,6 +226,35 @@ impl DataFetcher for RestDataFetcher {
                             status: Some(api_err.status_code()),
                         }));
                     }
+                } else if let Some(http_err) = err.downcast_ref::<crate::client::GithubApiError>() {
+                    // Redundant, but keep branch symmetry
+                    if matches!(http_err.status_code(), StatusCode::NOT_FOUND) {
+                        metrics::FETCH_REQUESTS_TOTAL
+                            .with_label_values(&["rest", op, "success"])
+                            .inc();
+                        metrics::FETCH_LATENCY_SECONDS
+                            .with_label_values(&["rest", op])
+                            .observe(elapsed);
+                        return Ok(UserFetch::Missing(MissingUser {
+                            id: user.id,
+                            login: user.login.clone(),
+                            status: Some(http_err.status_code()),
+                        }));
+                    }
+                } else if let Some(http_status) = err.downcast_ref::<gh_broker::HttpStatusError>() {
+                    if http_status.status == StatusCode::NOT_FOUND {
+                        metrics::FETCH_REQUESTS_TOTAL
+                            .with_label_values(&["rest", op, "success"])
+                            .inc();
+                        metrics::FETCH_LATENCY_SECONDS
+                            .with_label_values(&["rest", op])
+                            .observe(elapsed);
+                        return Ok(UserFetch::Missing(MissingUser {
+                            id: user.id,
+                            login: user.login.clone(),
+                            status: Some(http_status.status),
+                        }));
+                    }
                 }
                 metrics::FETCH_REQUESTS_TOTAL
                     .with_label_values(&["rest", op, "error"])
