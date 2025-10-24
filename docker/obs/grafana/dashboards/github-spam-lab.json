@@ -60,6 +60,33 @@
   },
   "panels": [
     {
+      "type": "stat",
+      "title": "GQL Remaining (by op)",
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 0 },
+      "targets": [ { "expr": "gql_rate_limit_remaining" } ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
+      "fieldConfig": { "defaults": { "unit": "none" } }
+    },
+    {
+      "type": "stat",
+      "title": "GQL Limit (by op)",
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 0 },
+      "targets": [ { "expr": "gql_rate_limit_limit" } ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": false } }
+    },
+    {
+      "type": "timeseries",
+      "title": "GQL Remaining over time",
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
+      "targets": [ { "expr": "gql_rate_limit_remaining", "legendFormat": "{{op}}" } ]
+    },
+    {
+      "type": "timeseries",
+      "title": "GQL Resource Limit Events/sec",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 4 },
+      "targets": [ { "expr": "sum by (op) (rate(gql_resource_limit_events_total[5m]))", "legendFormat": "{{op}}" } ]
+    },
+    {
       "type": "timeseries",
       "title": "DB Issues by Repo",
       "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },

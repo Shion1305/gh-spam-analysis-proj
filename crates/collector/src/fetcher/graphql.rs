@@ -24,6 +24,7 @@ const GRAPHQL_ENDPOINT: &str = "https://api.github.com/graphql";
 
 const REPO_QUERY: &str = r#"
 query RepoInfo($owner: String!, $name: String!) {
+  rateLimit { limit remaining resetAt used cost }
   repository(owner: $owner, name: $name) {
     databaseId
     nameWithOwner
@@ -43,6 +44,7 @@ query RepoIssues(
   $cursor: String,
   $since: DateTime
 ) {
+  rateLimit { limit remaining resetAt used cost }
   repository(owner: $owner, name: $name) {
     databaseId
     nameWithOwner
@@ -135,6 +137,7 @@ query IssueComments(
   $perPage: Int!,
   $cursor: String
 ) {
+  rateLimit { limit remaining resetAt used cost }
   repository(owner: $owner, name: $name) {
     issue(number: $number) {
       comments(
@@ -228,7 +231,7 @@ impl GraphqlDataFetcher {
         }
     }
 
-    async fn execute_graphql(&self, query: &str, variables: Value) -> Result<Value> {
+    async fn execute_graphql(&self, op: &str, query: &str, variables: Value) -> Result<Value> {
         let payload = json!({
             "query": query,
             "variables": variables,
@@ -261,6 +264,27 @@ impl GraphqlDataFetcher {
 
         let body = response.into_body();
         let value: Value = serde_json::from_slice(&body)?;
+
+        // Update rate limit gauges when present
+        if let Some(rl) = value.get("data").and_then(|d| d.get("rateLimit")) {
+            if let Some(limit) = rl.get("limit").and_then(Value::as_i64) {
+                crate::metrics::GQL_RATE_LIMIT_LIMIT
+                    .with_label_values(&[op])
+                    .set(limit as i64);
+            }
+            if let Some(rem) = rl.get("remaining").and_then(Value::as_i64) {
+                crate::metrics::GQL_RATE_LIMIT_REMAINING
+                    .with_label_values(&[op])
+                    .set(rem as i64);
+            }
+            if let Some(reset) = rl.get("resetAt").and_then(Value::as_str) {
+                if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(reset) {
+                    crate::metrics::GQL_RATE_LIMIT_RESET_TS
+                        .with_label_values(&[op])
+                        .set(dt.timestamp());
+                }
+            }
+        }
 
         if let Some(errors) = value.get("errors").and_then(Value::as_array) {
             return Err(map_graphql_errors(errors));
@@ -438,6 +462,7 @@ impl DataFetcher for GraphqlDataFetcher {
         let start = Instant::now();
         let response = self
             .execute_graphql(
+                "repo",
                 REPO_QUERY,
                 json!({
                     "owner": owner,
@@ -518,6 +543,7 @@ impl DataFetcher for GraphqlDataFetcher {
         let start = Instant::now();
         let response = self
             .execute_graphql(
+                "issues",
                 ISSUES_QUERY,
                 json!({
                     "owner": owner,
@@ -693,6 +719,7 @@ impl DataFetcher for GraphqlDataFetcher {
         let start = Instant::now();
         let response = self
             .execute_graphql(
+                "comments",
                 ISSUE_COMMENTS_QUERY,
                 json!({
                     "owner": owner,

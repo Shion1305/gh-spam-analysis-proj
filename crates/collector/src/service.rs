@@ -70,6 +70,9 @@ impl Collector {
                 Err(err) => {
                     // Retry only on GraphQL resource limit errors
                     if err.downcast_ref::<GraphqlResourceLimitError>().is_some() {
+                        crate::metrics::GQL_RESOURCE_LIMIT_EVENTS_TOTAL
+                            .with_label_values(&[label])
+                            .inc();
                         tracing::warn!(
                             attempt,
                             label,
@@ -78,7 +81,9 @@ impl Collector {
                         );
                         tokio::time::sleep(delay).await;
                         attempt += 1;
-                        delay = delay * 2;
+                        if attempt < max_attempts {
+                            delay = std::cmp::min(delay * 2, std::time::Duration::from_secs(60));
+                        }
                         continue;
                     }
                     return Err(err);
@@ -350,23 +355,43 @@ impl Collector {
         let mut seen_existing = false;
 
         loop {
-            let page = self
-                .retry_graphql(
-                    || async {
-                        self.fetcher
-                            .fetch_issues(
-                                &seed.owner,
-                                &seed.name,
-                                repo_row.id,
-                                watermark,
-                                cursor.clone(),
-                                self.config.page_size,
-                            )
-                            .await
-                    },
-                    "fetch_issues",
-                )
-                .await?;
+            let mut issues_page_size: u32 = self.config.page_size.min(100).max(20);
+            let page = {
+                let mut attempt: u32 = 0;
+                let max_attempts: u32 = 15;
+                let mut delay = std::time::Duration::from_secs(2);
+                loop {
+                    match self
+                        .fetcher
+                        .fetch_issues(
+                            &seed.owner,
+                            &seed.name,
+                            repo_row.id,
+                            watermark,
+                            cursor.clone(),
+                            issues_page_size,
+                        )
+                        .await
+                    {
+                        Ok(v) => break v,
+                        Err(err) => {
+                            if err.downcast_ref::<GraphqlResourceLimitError>().is_some() {
+                                crate::metrics::GQL_RESOURCE_LIMIT_EVENTS_TOTAL
+                                    .with_label_values(&["issues"])
+                                    .inc();
+                                issues_page_size = std::cmp::max(20, issues_page_size / 2);
+                                tracing::warn!(attempt, issues_page_size, wait_secs = delay.as_secs(), "graphql resource limit on issues; retrying");
+                                if attempt >= max_attempts { return Err(err); }
+                                tokio::time::sleep(delay).await;
+                                delay = std::cmp::min(delay * 2, std::time::Duration::from_secs(60));
+                                attempt += 1;
+                                continue;
+                            }
+                            return Err(err);
+                        }
+                    }
+                }
+            };
 
             if page.items.is_empty() {
                 break;
@@ -471,24 +496,43 @@ impl Collector {
     ) -> Result<()> {
         let mut cursor: Option<String> = None;
         loop {
-            let page = match self
-                .retry_graphql(
-                    || async {
-                        self.fetcher
-                            .fetch_issue_comments(
-                                owner,
-                                name,
-                                issue.number,
-                                issue.id,
-                                cursor.clone(),
-                                self.config.page_size,
-                            )
-                            .await
-                    },
-                    "fetch_issue_comments",
-                )
-                .await
-            {
+            let mut comments_page_size: u32 = self.config.page_size.min(100).max(20);
+            let page = match {
+                let mut attempt: u32 = 0;
+                let max_attempts: u32 = 15;
+                let mut delay = std::time::Duration::from_secs(2);
+                loop {
+                    match self
+                        .fetcher
+                        .fetch_issue_comments(
+                            owner,
+                            name,
+                            issue.number,
+                            issue.id,
+                            cursor.clone(),
+                            comments_page_size,
+                        )
+                        .await
+                    {
+                        Ok(v) => break Ok(v),
+                        Err(err) => {
+                            if err.downcast_ref::<GraphqlResourceLimitError>().is_some() {
+                                crate::metrics::GQL_RESOURCE_LIMIT_EVENTS_TOTAL
+                                    .with_label_values(&["comments"])
+                                    .inc();
+                                comments_page_size = std::cmp::max(20, comments_page_size / 2);
+                                tracing::warn!(attempt, comments_page_size, wait_secs = delay.as_secs(), "graphql resource limit on comments; retrying");
+                                if attempt >= max_attempts { break Err(err); }
+                                tokio::time::sleep(delay).await;
+                                delay = std::cmp::min(delay * 2, std::time::Duration::from_secs(60));
+                                attempt += 1;
+                                continue;
+                            }
+                            break Err(err);
+                        }
+                    }
+                }
+            } {
                 Ok(page) => page,
                 Err(err) => {
                     let details = extract_error_details(&err);

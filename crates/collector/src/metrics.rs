@@ -206,6 +206,43 @@ pub static COMMENTS_404_SKIPS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     .expect("comments 404 skips total")
 });
 
+// GraphQL rate limit visibility per operation
+pub static GQL_RATE_LIMIT_REMAINING: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "gql_rate_limit_remaining",
+        "GraphQL remaining points (per operation)",
+        &["op"]
+    )
+    .expect("gql rate remaining")
+});
+
+pub static GQL_RATE_LIMIT_LIMIT: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "gql_rate_limit_limit",
+        "GraphQL hourly point limit (per operation)",
+        &["op"]
+    )
+    .expect("gql rate limit")
+});
+
+pub static GQL_RATE_LIMIT_RESET_TS: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "gql_rate_limit_reset_timestamp_seconds",
+        "GraphQL next reset timestamp (per operation)",
+        &["op"]
+    )
+    .expect("gql rate reset ts")
+});
+
+pub static GQL_RESOURCE_LIMIT_EVENTS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_int_counter_vec!(
+        "gql_resource_limit_events_total",
+        "Total GraphQL resource limit events (per operation)",
+        &["op"]
+    )
+    .expect("gql resource limit events")
+});
+
 pub static ISSUES_404_SKIPS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     register_int_counter!(
         "issues_404_skips_total",
