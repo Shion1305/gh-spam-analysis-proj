@@ -637,6 +637,10 @@ impl CollectionJobRepository for PgCollectionJobRepository {
             VALUES ($1, $2, $3)
             ON CONFLICT (owner, name) DO UPDATE
                 SET priority = EXCLUDED.priority,
+                    -- If a job is in a permanent error state, allow POST /repos to reset it
+                    status = CASE WHEN collection_jobs.status = 'error' THEN 'pending' ELSE collection_jobs.status END,
+                    failure_count = CASE WHEN collection_jobs.status = 'error' THEN 0 ELSE collection_jobs.failure_count END,
+                    error_message = CASE WHEN collection_jobs.status = 'error' THEN NULL ELSE collection_jobs.error_message END,
                     updated_at = now()
             RETURNING id, owner, name, full_name, status, priority,
                       last_attempt_at, last_completed_at, failure_count, error_message,
