@@ -270,12 +270,12 @@ impl GraphqlDataFetcher {
             if let Some(limit) = rl.get("limit").and_then(Value::as_i64) {
                 crate::metrics::GQL_RATE_LIMIT_LIMIT
                     .with_label_values(&[op])
-                    .set(limit as i64);
+                    .set(limit);
             }
             if let Some(rem) = rl.get("remaining").and_then(Value::as_i64) {
                 crate::metrics::GQL_RATE_LIMIT_REMAINING
                     .with_label_values(&[op])
-                    .set(rem as i64);
+                    .set(rem);
             }
             if let Some(reset) = rl.get("resetAt").and_then(Value::as_str) {
                 if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(reset) {
