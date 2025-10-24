@@ -308,6 +308,9 @@ struct CollectionJobResponse {
     status: String,
     priority: i32,
     failure_count: i32,
+    last_attempt_at: Option<DateTime<Utc>>,
+    last_completed_at: Option<DateTime<Utc>>,
+    error_message: Option<String>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -335,6 +338,9 @@ async fn register_repo(
         status: format!("{:?}", job.status),
         priority: job.priority,
         failure_count: job.failure_count,
+        last_attempt_at: job.last_attempt_at,
+        last_completed_at: job.last_completed_at,
+        error_message: None,
         created_at: job.created_at,
         updated_at: job.updated_at,
     }))
@@ -363,10 +369,28 @@ async fn list_collection_jobs(
             status: format!("{:?}", job.status),
             priority: job.priority,
             failure_count: job.failure_count,
+            last_attempt_at: job.last_attempt_at,
+            last_completed_at: job.last_completed_at,
+            error_message: displayable_error(&job.status, job.error_message.as_deref()),
             created_at: job.created_at,
             updated_at: job.updated_at,
         })
         .collect();
 
     Ok(Json(response))
+}
+
+fn displayable_error(status: &db::models::CollectionStatus, message: Option<&str>) -> Option<String> {
+    use db::models::CollectionStatus as S;
+    match status {
+        S::Failed | S::Error => message.map(|m| truncate(m, 512)),
+        _ => None,
+    }
+}
+
+fn truncate(msg: &str, max: usize) -> String {
+    if msg.len() <= max { return msg.to_string(); }
+    let mut s: String = msg.chars().take(max).collect();
+    s.push('…');
+    s
 }
