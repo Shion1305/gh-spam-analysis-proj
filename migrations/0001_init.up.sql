@@ -1,12 +1,23 @@
+-- Core repositories table
 CREATE TABLE repositories (
     id BIGINT PRIMARY KEY,
-    full_name TEXT NOT NULL UNIQUE,
+    full_name TEXT NOT NULL,
     is_fork BOOLEAN NOT NULL,
     created_at TIMESTAMPTZ NOT NULL,
     pushed_at TIMESTAMPTZ,
     raw JSONB NOT NULL
 );
 
+-- Basic format: exactly one slash, non-empty owner and name
+ALTER TABLE repositories
+    ADD CONSTRAINT repositories_full_name_format
+    CHECK (full_name ~ '^[^/]+/[^/]+$');
+
+-- Case-insensitive uniqueness on full_name
+CREATE UNIQUE INDEX idx_repositories_full_name_ci
+    ON repositories (LOWER(full_name));
+
+-- Helpful index for equality lookups by full_name
 CREATE INDEX idx_repositories_full_name ON repositories (full_name);
 
 CREATE TABLE users (
@@ -18,7 +29,8 @@ CREATE TABLE users (
     followers BIGINT,
     following BIGINT,
     public_repos BIGINT,
-    raw JSONB NOT NULL
+    raw JSONB NOT NULL,
+    found BOOLEAN NOT NULL DEFAULT TRUE
 );
 
 CREATE INDEX idx_users_login ON users (login);
@@ -38,6 +50,7 @@ CREATE TABLE issues (
     closed_at TIMESTAMPTZ,
     dedupe_hash TEXT NOT NULL,
     raw JSONB NOT NULL,
+    found BOOLEAN NOT NULL DEFAULT TRUE,
     UNIQUE (repo_id, number)
 );
 
@@ -54,7 +67,8 @@ CREATE TABLE comments (
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ,
     dedupe_hash TEXT NOT NULL,
-    raw JSONB NOT NULL
+    raw JSONB NOT NULL,
+    found BOOLEAN NOT NULL DEFAULT TRUE
 );
 
 CREATE INDEX idx_comments_issue_id ON comments (issue_id);
@@ -78,3 +92,28 @@ CREATE TABLE collector_watermarks (
     repo_full_name TEXT PRIMARY KEY,
     last_updated TIMESTAMPTZ NOT NULL
 );
+
+-- Collection jobs (seeding queue for the collector)
+-- Include permanent 'error' state in the enum.
+CREATE TYPE collection_status AS ENUM ('pending', 'in_progress', 'completed', 'failed', 'error');
+
+CREATE TABLE collection_jobs (
+    id BIGSERIAL PRIMARY KEY,
+    owner TEXT NOT NULL,
+    name TEXT NOT NULL,
+    full_name TEXT NOT NULL GENERATED ALWAYS AS (owner || '/' || name) STORED,
+    status collection_status NOT NULL DEFAULT 'pending',
+    priority INT NOT NULL DEFAULT 0,
+    last_attempt_at TIMESTAMPTZ,
+    last_completed_at TIMESTAMPTZ,
+    failure_count INT NOT NULL DEFAULT 0,
+    error_message TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (owner, name)
+);
+
+CREATE INDEX idx_collection_jobs_status ON collection_jobs (status);
+CREATE INDEX idx_collection_jobs_priority ON collection_jobs (priority DESC, created_at ASC);
+CREATE INDEX idx_collection_jobs_full_name ON collection_jobs (full_name);
+CREATE INDEX idx_collection_jobs_status_priority ON collection_jobs (status, priority DESC, created_at ASC);
