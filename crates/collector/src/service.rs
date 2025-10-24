@@ -16,9 +16,9 @@ use normalizer::models::{
 };
 use normalizer::payloads::UserRef;
 use serde::Deserialize;
+use thiserror::Error;
 use tokio::time::sleep;
 use tracing::{info, instrument, warn};
-use thiserror::Error;
 
 use crate::client::GithubApiError;
 use crate::fetcher::{DataFetcher, UserFetch};

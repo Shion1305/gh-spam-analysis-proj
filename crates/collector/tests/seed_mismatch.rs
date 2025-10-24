@@ -3,10 +3,10 @@ use std::sync::Arc;
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::Utc;
-use collector::fetcher::{CommentPage, CommentRecord, DataFetcher, IssuePage, IssueRecord, RepoSnapshot, UserFetch};
+use collector::fetcher::{CommentPage, DataFetcher, IssuePage, RepoSnapshot, UserFetch};
 use collector::service::Collector;
 use common::config::{CollectorConfig, FetchMode};
-use db::models::{CollectionJobCreate, CollectionJobUpdate, CollectionStatus};
+use db::models::CollectionJobCreate;
 use db::pg::PgDatabase;
 use db::Repositories;
 use db_test_fixture::DbFixture;
@@ -42,7 +42,10 @@ impl DataFetcher for MismatchFetcher {
         _per_page: u32,
     ) -> Result<IssuePage> {
         // Not reached due to mismatch guard
-        Ok(IssuePage { items: Vec::new(), next_cursor: None })
+        Ok(IssuePage {
+            items: Vec::new(),
+            next_cursor: None,
+        })
     }
 
     async fn fetch_issue_comments(
@@ -55,7 +58,10 @@ impl DataFetcher for MismatchFetcher {
         _per_page: u32,
     ) -> Result<CommentPage> {
         // Not reached due to mismatch guard
-        Ok(CommentPage { items: Vec::new(), next_cursor: None })
+        Ok(CommentPage {
+            items: Vec::new(),
+            next_cursor: None,
+        })
     }
 
     async fn fetch_user(&self, user: &UserRef) -> Result<UserFetch> {
@@ -106,12 +112,11 @@ async fn seed_repo_mismatch_is_guarded_and_marked_error() -> Result<()> {
     let _ = collector.run_once().await; // expect error path for the job
 
     // Verify job is marked as Error (permanent) and has a helpful message
-    let row: (String, Option<String>) = sqlx::query_as(
-        "SELECT status::text, error_message FROM collection_jobs WHERE id = $1",
-    )
-    .bind(job.id)
-    .fetch_one(db.pool())
-    .await?;
+    let row: (String, Option<String>) =
+        sqlx::query_as("SELECT status::text, error_message FROM collection_jobs WHERE id = $1")
+            .bind(job.id)
+            .fetch_one(db.pool())
+            .await?;
     assert_eq!(row.0, "error");
     if let Some(msg) = row.1 {
         assert!(msg.to_lowercase().contains("seed mismatch"));
@@ -128,4 +133,3 @@ async fn seed_repo_mismatch_is_guarded_and_marked_error() -> Result<()> {
     handle.cleanup().await?;
     Ok(())
 }
-
