@@ -1,8 +1,7 @@
 use http::Request;
-use sha2::{Digest, Sha256};
 
-use gh_broker::model::Priority;
 use gh_broker::model::GithubRequest;
+use gh_broker::model::Priority;
 
 fn mk_graphql_body(query: &str, variables_json: &str) -> Vec<u8> {
     let payload = format!(r#"{{"query":{},"variables":{}}}"#, query, variables_json);
@@ -11,8 +10,14 @@ fn mk_graphql_body(query: &str, variables_json: &str) -> Vec<u8> {
 
 #[test]
 fn graphql_requests_with_different_bodies_have_different_keys() {
-    let body_a = mk_graphql_body("\"query A\"", "{\"owner\":\"octocat\",\"name\":\"Hello-World\"}");
-    let body_b = mk_graphql_body("\"query A\"", "{\"owner\":\"octocat\",\"name\":\"Spoon-Knife\"}");
+    let body_a = mk_graphql_body(
+        "\"query A\"",
+        "{\"owner\":\"octocat\",\"name\":\"Hello-World\"}",
+    );
+    let body_b = mk_graphql_body(
+        "\"query A\"",
+        "{\"owner\":\"octocat\",\"name\":\"Spoon-Knife\"}",
+    );
 
     let req_a = Request::builder()
         .method("POST")
@@ -32,7 +37,11 @@ fn graphql_requests_with_different_bodies_have_different_keys() {
     let gh_a = GithubRequest::new(req_a, Priority::Normal).expect("req a");
     let gh_b = GithubRequest::new(req_b, Priority::Normal).expect("req b");
 
-    assert_ne!(gh_a.key(), gh_b.key(), "GraphQL keys must differ for different payloads");
+    assert_ne!(
+        gh_a.key(),
+        gh_b.key(),
+        "GraphQL keys must differ for different payloads"
+    );
 }
 
 #[test]
@@ -55,4 +64,3 @@ fn get_requests_ignore_body_in_key() {
 
     assert_eq!(gh_a.key(), gh_b.key(), "GET keys should not include body");
 }
-
