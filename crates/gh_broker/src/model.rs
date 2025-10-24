@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use http::{header, HeaderMap, HeaderValue, Request};
+use sha2::{Digest, Sha256};
 use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -84,7 +85,8 @@ impl GithubRequest {
 
         let budget = Budget::classify(inner.uri().path(), resource_hdr.as_ref());
 
-        let key = format!(
+        // Base key: method + path + query
+        let mut key = format!(
             "{} {}{}",
             inner.method(),
             inner.uri().path(),
@@ -94,6 +96,19 @@ impl GithubRequest {
                 .map(|q| format!("?{}", q))
                 .unwrap_or_default()
         );
+
+        // For non-GET requests (e.g., GraphQL POST /graphql), include a short body hash
+        // to avoid coalescing unrelated requests with identical method/path/query.
+        if inner.method() != http::Method::GET {
+            let mut hasher = Sha256::new();
+            hasher.update(inner.body());
+            let digest = hasher.finalize();
+            let hex = format!("{:x}", digest);
+            // Use first 16 hex chars to keep the key compact
+            let short = &hex[..16.min(hex.len())];
+            key.push_str(" body:");
+            key.push_str(short);
+        }
 
         if !inner.headers().contains_key(header::USER_AGENT) {
             return Err(anyhow::anyhow!("user-agent header required"));

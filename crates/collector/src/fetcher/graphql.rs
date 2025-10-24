@@ -243,7 +243,16 @@ impl GraphqlDataFetcher {
             .header("X-GitHub-Api-Version", "2022-11-28")
             .body(serde_json::to_vec(&payload)?)?;
 
-        let response = self.broker.enqueue(request, Priority::Normal).await?;
+        // Capture broker errors and annotate with endpoint for better context
+        let response = match self.broker.enqueue(request, Priority::Normal).await {
+            Ok(resp) => resp,
+            Err(err) => {
+                if let Some(http) = err.downcast_ref::<gh_broker::HttpStatusError>() {
+                    return Err(GithubApiError::status(http.status, "graphql").into());
+                }
+                return Err(err);
+            }
+        };
 
         let status = response.status();
         if !status.is_success() {
