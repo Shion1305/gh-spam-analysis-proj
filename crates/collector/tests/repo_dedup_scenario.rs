@@ -112,7 +112,13 @@ async fn collector_dedup_repo_registration_across_runs() -> Result<()> {
         repo_id: 4242,
         full_name: "Owner/Example".into(),
     }) as Arc<dyn DataFetcher>;
-    let collector1 = Collector::new(test_config(), fetcher1, repos.clone());
+    let cfg1 = test_config();
+    let collector1 = Collector::new(
+        cfg1.clone(),
+        fetcher1,
+        repos.clone(),
+        cfg1.max_concurrent_repos,
+    );
     collector1.run_once().await?;
 
     let count1: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM repositories")
@@ -135,7 +141,13 @@ async fn collector_dedup_repo_registration_across_runs() -> Result<()> {
         repo_id: 4242,
         full_name: "owner/example".into(),
     }) as Arc<dyn DataFetcher>;
-    let collector2 = Collector::new(test_config(), fetcher2, repos.clone());
+    let cfg2 = test_config();
+    let collector2 = Collector::new(
+        cfg2.clone(),
+        fetcher2,
+        repos.clone(),
+        cfg2.max_concurrent_repos,
+    );
     collector2.run_once().await?;
 
     let (count2, full_name): (i64, String) =

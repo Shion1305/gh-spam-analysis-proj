@@ -108,7 +108,13 @@ async fn seed_repo_mismatch_is_guarded_and_marked_error() -> Result<()> {
     // Run collector with mismatching fetcher
     let fetcher = Arc::new(MismatchFetcher) as Arc<dyn DataFetcher>;
     let repos: Arc<dyn Repositories> = Arc::new(db.clone());
-    let collector = Collector::new(test_config(), fetcher, repos.clone());
+    let cfg = test_config();
+    let collector = Collector::new(
+        cfg.clone(),
+        fetcher,
+        repos.clone(),
+        cfg.max_concurrent_repos,
+    );
     let _ = collector.run_once().await; // expect error path for the job
 
     // Verify job is marked as Error (permanent) and has a helpful message

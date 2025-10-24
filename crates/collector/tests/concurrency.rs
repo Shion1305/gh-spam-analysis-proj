@@ -151,7 +151,12 @@ async fn processes_repositories_in_parallel() -> Result<()> {
         fetch_mode: FetchMode::Hybrid,
         max_concurrent_repos: 2,
     };
-    let collector = Collector::new(cfg, fetcher.clone(), repos);
+    let collector = Collector::new(
+        cfg.clone(),
+        fetcher.clone(),
+        repos,
+        cfg.max_concurrent_repos,
+    );
 
     let start = Instant::now();
     collector.run_once().await?;

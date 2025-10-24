@@ -36,6 +36,7 @@ pub struct Collector {
     config: CollectorConfig,
     fetcher: Arc<dyn DataFetcher>,
     repos: Arc<dyn Repositories>,
+    max_concurrent_repos: usize,
 }
 
 struct ProcessContext<'a> {
@@ -58,11 +59,13 @@ impl Collector {
         config: CollectorConfig,
         fetcher: Arc<dyn DataFetcher>,
         repos: Arc<dyn Repositories>,
+        max_concurrent_repos: usize,
     ) -> Self {
         Self {
             config,
             fetcher,
             repos,
+            max_concurrent_repos,
         }
     }
 
@@ -103,7 +106,7 @@ impl Collector {
         let rule_version = RuleEngine::default().version().to_string();
         let repo_errors = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let semaphore = Arc::new(tokio::sync::Semaphore::new(
-            self.config.max_concurrent_repos.max(1),
+            self.max_concurrent_repos.max(1),
         ));
         let mut join_set = tokio::task::JoinSet::new();
 
@@ -133,6 +136,7 @@ impl Collector {
             let rule_version = rule_version.clone();
             let repo_errors = repo_errors.clone();
             let config_clone = self.config.clone();
+            let max_concurrent_repos = self.max_concurrent_repos;
             join_set.spawn(async move {
                 let _permit = semaphore.acquire_owned().await.unwrap();
 
@@ -145,7 +149,8 @@ impl Collector {
                 // Per-task counters
                 let mut session_counts = HashMap::new();
                 let mut dedupe_counts = HashMap::new();
-                let c = Collector { config: config_clone, fetcher: fetcher.clone(), repos: repos.clone() };
+                // The nested Collector is only used to call process_repo; concurrency not used there.
+                let c = Collector { config: config_clone, fetcher: fetcher.clone(), repos: repos.clone(), max_concurrent_repos };
                 let result = c
                     .process_repo(&seed, &rule_version, &mut session_counts, &mut dedupe_counts)
                     .await;

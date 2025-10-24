@@ -91,7 +91,12 @@ async fn main() -> Result<()> {
     let database = Arc::new(PgDatabase::connect(&config.database.url).await?);
     let repositories: Arc<dyn Repositories> = database.clone() as Arc<dyn Repositories>;
 
-    let collector = Collector::new(config.collector.clone(), fetcher, repositories);
+    let collector = Collector::new(
+        config.collector.clone(),
+        fetcher,
+        repositories,
+        config.collector.max_concurrent_repos,
+    );
     info!(
         interval = config.collector.interval_secs,
         "collector started"

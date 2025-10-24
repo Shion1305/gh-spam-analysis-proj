@@ -121,7 +121,8 @@ async fn job_completes_on_success() -> Result<()> {
         .await?;
 
     let fetcher: Arc<dyn DataFetcher> = Arc::new(StubFetcher { mode: Mode::Ok });
-    let collector = Collector::new(cfg(), fetcher, repos);
+    let cfgv = cfg();
+    let collector = Collector::new(cfgv.clone(), fetcher, repos, cfgv.max_concurrent_repos);
     collector.run_once().await?;
 
     let listed = db.collection_jobs().list(10).await?;
@@ -157,7 +158,8 @@ async fn job_retries_on_transient_error() -> Result<()> {
     let fetcher: Arc<dyn DataFetcher> = Arc::new(StubFetcher {
         mode: Mode::Transient,
     });
-    let collector = Collector::new(cfg(), fetcher, repos);
+    let cfgv = cfg();
+    let collector = Collector::new(cfgv.clone(), fetcher, repos, cfgv.max_concurrent_repos);
     collector.run_once().await?;
 
     let listed = db.collection_jobs().list(10).await?;
@@ -195,7 +197,8 @@ async fn job_errors_on_permanent_error() -> Result<()> {
     let fetcher: Arc<dyn DataFetcher> = Arc::new(StubFetcher {
         mode: Mode::Permanent,
     });
-    let collector = Collector::new(cfg(), fetcher, repos);
+    let cfgv = cfg();
+    let collector = Collector::new(cfgv.clone(), fetcher, repos, cfgv.max_concurrent_repos);
     collector.run_once().await?;
 
     let listed = db.collection_jobs().list(10).await?;

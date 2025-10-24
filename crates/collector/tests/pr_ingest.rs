@@ -141,7 +141,12 @@ async fn ingests_prs_and_issues() -> Result<()> {
         fetch_mode: FetchMode::Hybrid,
         max_concurrent_repos: 1,
     };
-    let collector = Collector::new(cfg, Arc::new(PrIssueFetcher), repos);
+    let collector = Collector::new(
+        cfg.clone(),
+        Arc::new(PrIssueFetcher),
+        repos,
+        cfg.max_concurrent_repos,
+    );
     collector.run_once().await?;
 
     // Assert both records exist and PR flag is correct
