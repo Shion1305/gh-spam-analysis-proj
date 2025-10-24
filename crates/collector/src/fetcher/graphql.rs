@@ -868,6 +868,10 @@ fn decode_global_id(value: &str) -> Option<i64> {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("graphql resource limit exceeded")]
+pub struct GraphqlResourceLimitError;
+
 fn map_graphql_errors(errors: &[Value]) -> anyhow::Error {
     if let Some(first) = errors.first() {
         let message = first
@@ -881,6 +885,13 @@ fn map_graphql_errors(errors: &[Value]) -> anyhow::Error {
             .unwrap_or("");
         if error_type == "NOT_FOUND" {
             return GithubApiError::status(StatusCode::NOT_FOUND, "graphql").into();
+        }
+        // Treat resource limit errors as a distinct, retryable error.
+        let lower = message.to_ascii_lowercase();
+        if lower.contains("resource limits for this query exceeded")
+            || error_type.eq_ignore_ascii_case("MAX_NODE_LIMIT_EXCEEDED")
+        {
+            return GraphqlResourceLimitError.into();
         }
         return anyhow!(message.to_string());
     }

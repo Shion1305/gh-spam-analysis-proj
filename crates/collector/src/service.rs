@@ -21,6 +21,7 @@ use tokio::time::sleep;
 use tracing::{info, instrument, warn};
 
 use crate::client::GithubApiError;
+use crate::fetcher::graphql::GraphqlResourceLimitError;
 use crate::fetcher::{DataFetcher, UserFetch};
 use crate::metrics::{self, ActiveRepoGuard};
 use common::config::CollectorConfig;
@@ -55,6 +56,41 @@ struct SeedMismatchError {
 }
 
 impl Collector {
+    async fn retry_graphql<T, Fut, F>(&self, mut op: F, label: &str) -> Result<T>
+    where
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = Result<T>>,
+    {
+        let mut attempt: u32 = 0;
+        let max_attempts: u32 = 5;
+        let mut delay = std::time::Duration::from_secs(2);
+        while attempt < max_attempts {
+            match op().await {
+                Ok(v) => return Ok(v),
+                Err(err) => {
+                    // Retry only on GraphQL resource limit errors
+                    if err.downcast_ref::<GraphqlResourceLimitError>().is_some() {
+                        tracing::warn!(
+                            attempt,
+                            label,
+                            wait_secs = delay.as_secs(),
+                            "graphql resource limit; retrying"
+                        );
+                        tokio::time::sleep(delay).await;
+                        attempt += 1;
+                        delay = std::cmp::min(delay * 2, std::time::Duration::from_secs(30));
+                        continue;
+                    }
+                    return Err(err);
+                }
+            }
+        }
+        anyhow::bail!(
+            "graphql resource limit after {} attempts for {}",
+            max_attempts,
+            label
+        )
+    }
     pub fn new(
         config: CollectorConfig,
         fetcher: Arc<dyn DataFetcher>,
@@ -278,8 +314,10 @@ impl Collector {
         let _active_repo = ActiveRepoGuard::new();
         let repo_full_name = format!("{}/{}", seed.owner, seed.name);
         let repo_snapshot = self
-            .fetcher
-            .fetch_repo(&seed.owner, &seed.name)
+            .retry_graphql(
+                || self.fetcher.fetch_repo(&seed.owner, &seed.name),
+                "fetch_repo",
+            )
             .await
             .with_context(|| format!("fetching repo {}", seed.name))?;
 
@@ -313,14 +351,20 @@ impl Collector {
 
         loop {
             let page = self
-                .fetcher
-                .fetch_issues(
-                    &seed.owner,
-                    &seed.name,
-                    repo_row.id,
-                    watermark,
-                    cursor.clone(),
-                    self.config.page_size,
+                .retry_graphql(
+                    || async {
+                        self.fetcher
+                            .fetch_issues(
+                                &seed.owner,
+                                &seed.name,
+                                repo_row.id,
+                                watermark,
+                                cursor.clone(),
+                                self.config.page_size,
+                            )
+                            .await
+                    },
+                    "fetch_issues",
                 )
                 .await?;
 
@@ -428,14 +472,20 @@ impl Collector {
         let mut cursor: Option<String> = None;
         loop {
             let page = match self
-                .fetcher
-                .fetch_issue_comments(
-                    owner,
-                    name,
-                    issue.number,
-                    issue.id,
-                    cursor.clone(),
-                    self.config.page_size,
+                .retry_graphql(
+                    || async {
+                        self.fetcher
+                            .fetch_issue_comments(
+                                owner,
+                                name,
+                                issue.number,
+                                issue.id,
+                                cursor.clone(),
+                                self.config.page_size,
+                            )
+                            .await
+                    },
+                    "fetch_issue_comments",
                 )
                 .await
             {
