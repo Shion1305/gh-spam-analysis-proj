@@ -815,7 +815,11 @@ async fn execute_once(
                 body_preview = %body_preview,
                 "GitHub returned error response"
             );
-            Err(HttpStatusError::with_endpoint(status, request.uri().path().trim_start_matches('/')).into())
+            Err(HttpStatusError::with_endpoint(
+                status,
+                request.uri().path().trim_start_matches('/'),
+            )
+            .into())
         }
         Err(err) => Err(err),
     }
