@@ -161,13 +161,32 @@ impl DataFetcher for RestDataFetcher {
                 v
             }
             Err(e) => {
-                metrics::FETCH_REQUESTS_TOTAL
-                    .with_label_values(&["rest", op, "error"])
-                    .inc();
-                metrics::FETCH_LATENCY_SECONDS
-                    .with_label_values(&["rest", op])
-                    .observe(elapsed);
-                return Err(e);
+                // Treat 404 on comments as empty page to avoid failing the job
+                let not_found = if let Some(api_err) = e.downcast_ref::<GithubApiError>() {
+                    api_err.status_code() == StatusCode::NOT_FOUND
+                } else if let Some(status_err) = e.downcast_ref::<gh_broker::HttpStatusError>() {
+                    status_err.status == StatusCode::NOT_FOUND
+                } else {
+                    false
+                };
+
+                if not_found {
+                    metrics::FETCH_REQUESTS_TOTAL
+                        .with_label_values(&["rest", op, "success"])
+                        .inc();
+                    metrics::FETCH_LATENCY_SECONDS
+                        .with_label_values(&["rest", op])
+                        .observe(elapsed);
+                    Vec::new()
+                } else {
+                    metrics::FETCH_REQUESTS_TOTAL
+                        .with_label_values(&["rest", op, "error"])
+                        .inc();
+                    metrics::FETCH_LATENCY_SECONDS
+                        .with_label_values(&["rest", op])
+                        .observe(elapsed);
+                    return Err(e);
+                }
             }
         };
 
