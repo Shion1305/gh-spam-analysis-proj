@@ -131,7 +131,8 @@ github-spam-lab/
    - Persists outcomes into `spam_flags` (versioned) for auditability.
 
 5. **API (`api`)**
-   - Axum-based service exposing `/repos` (POST to create jobs, GET to list), `/issues`, `/actors`, `/top/spammy-users`, `/healthz`, `/metrics`.
+   - Axum-based service exposing `/repos` (POST to create jobs, GET to list), `/issues`, `/actors`, `/collection-jobs`, `/top/spammy-users`, `/healthz`, `/metrics`.
+   - `/collection-jobs` includes job status plus error insights when relevant: `error_message` (truncated to 512 chars), `last_attempt_at`, `last_completed_at`.
    - Depends on trait objects (repositories, broker client, etc.) for testability.
 
 ---
