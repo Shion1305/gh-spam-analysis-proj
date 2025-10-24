@@ -131,8 +131,18 @@ impl BrokerGithubClient {
         Ok(response)
     }
 
-    fn join(&self, path: &str) -> Result<Url> {
-        Ok(self.base.join(path)?)
+    fn join_segments(&self, segments: &[&str]) -> Result<Url> {
+        let mut url = self.base.clone();
+        {
+            let mut path = url
+                .path_segments_mut()
+                .map_err(|_| anyhow!("base URL cannot be a cannot-be-a-base URL"))?;
+            path.clear();
+            for seg in segments {
+                path.push(seg);
+            }
+        }
+        Ok(url)
     }
 
     fn with_query(url: &mut Url, params: &[(&str, String)]) {
@@ -146,8 +156,7 @@ impl BrokerGithubClient {
 #[async_trait]
 impl GithubClient for BrokerGithubClient {
     async fn get_repo(&self, owner: &str, repo: &str) -> Result<Value> {
-        let path = format!("repos/{owner}/{repo}");
-        let url = self.join(&path)?;
+        let url = self.join_segments(&["repos", owner, repo])?;
         self.get_json(url, Priority::Critical).await
     }
 
@@ -159,8 +168,7 @@ impl GithubClient for BrokerGithubClient {
         page: u32,
         per_page: u32,
     ) -> Result<Vec<Value>> {
-        let path = format!("repos/{owner}/{repo}/issues");
-        let mut url = self.join(&path)?;
+        let mut url = self.join_segments(&["repos", owner, repo, "issues"])?.clone();
         let mut params = vec![
             ("state", "all".to_string()),
             ("sort", "updated".to_string()),
@@ -183,8 +191,8 @@ impl GithubClient for BrokerGithubClient {
         page: u32,
         per_page: u32,
     ) -> Result<Vec<Value>> {
-        let path = format!("repos/{owner}/{repo}/issues/{issue_number}/comments");
-        let mut url = self.join(&path)?;
+        let issue_num = issue_number.to_string();
+        let mut url = self.join_segments(&["repos", owner, repo, "issues", &issue_num, "comments"])?.clone();
         let params = [
             ("page", page.to_string()),
             ("per_page", per_page.to_string()),
@@ -194,8 +202,7 @@ impl GithubClient for BrokerGithubClient {
     }
 
     async fn get_user(&self, login: &str) -> Result<Value> {
-        let path = format!("users/{login}");
-        let url = self.join(&path)?;
+        let url = self.join_segments(&["users", login])?;
         self.get_json(url, Priority::Normal).await
     }
 }
