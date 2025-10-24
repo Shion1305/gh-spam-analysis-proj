@@ -186,6 +186,39 @@ impl Collector {
                         metrics::REPO_DURATION.with_label_values(&["error"]).observe(repo_started.elapsed().as_secs_f64());
 
                         let error_details = extract_error_details(&err);
+
+                        // Soft-skip: user 404 should not fail the job
+                        if matches!(error_details.status, Some(StatusCode::NOT_FOUND))
+                            && error_details
+                                .endpoint
+                                .as_deref()
+                                .map(|e| e.starts_with("users/"))
+                                .unwrap_or(false)
+                        {
+                            warn!(
+                                job_id = job.id,
+                                owner = %seed.owner,
+                                repo = %seed.name,
+                                endpoint = error_details.endpoint.as_deref().unwrap_or("-"),
+                                "user 404 encountered; treating as non-fatal and completing job"
+                            );
+                            if let Err(update_err) = repos
+                                .collection_jobs()
+                                .update(CollectionJobUpdate { id: job.id, status: CollectionStatus::Completed, error_message: None })
+                                .await
+                            {
+                                warn!(job_id = job.id, error = ?update_err, "failed to mark job as completed (user 404)");
+                            } else {
+                                metrics::REPO_JOB_STATUS.with_label_values(&[&job.full_name, "completed"]).set(1);
+                                metrics::REPO_JOB_STATUS.with_label_values(&[&job.full_name, "pending"]).set(0);
+                                metrics::REPO_JOB_STATUS.with_label_values(&[&job.full_name, "in_progress"]).set(0);
+                                metrics::REPO_JOB_STATUS.with_label_values(&[&job.full_name, "failed"]).set(0);
+                                metrics::REPO_JOB_STATUS.with_label_values(&[&job.full_name, "error"]).set(0);
+                                metrics::REPO_JOB_FAILURE_COUNT.with_label_values(&[&job.full_name]).set(0);
+                                metrics::REPO_LAST_SUCCESS_TIMESTAMP.with_label_values(&[&job.full_name]).set(Utc::now().timestamp());
+                            }
+                            return;
+                        }
                         let status = if is_permanent_error(&err) { CollectionStatus::Error } else { CollectionStatus::Failed };
                         let error_message = err.to_string();
                         if let Err(update_err) = repos
