@@ -180,11 +180,6 @@ impl Collector {
                         }
                     }
                     Err(err) => {
-                        repo_errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        metrics::RUN_ERRORS_TOTAL.inc();
-                        metrics::REPOS_PROCESSED_TOTAL.with_label_values(&["error"]).inc();
-                        metrics::REPO_DURATION.with_label_values(&["error"]).observe(repo_started.elapsed().as_secs_f64());
-
                         let error_details = extract_error_details(&err);
 
                         // Soft-skip: user 404 should not fail the job
@@ -219,6 +214,11 @@ impl Collector {
                             }
                             return;
                         }
+                        // Otherwise, this is a real error: record error metrics and update job status
+                        repo_errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        metrics::RUN_ERRORS_TOTAL.inc();
+                        metrics::REPOS_PROCESSED_TOTAL.with_label_values(&["error"]).inc();
+                        metrics::REPO_DURATION.with_label_values(&["error"]).observe(repo_started.elapsed().as_secs_f64());
                         let status = if is_permanent_error(&err) { CollectionStatus::Error } else { CollectionStatus::Failed };
                         let error_message = err.to_string();
                         if let Err(update_err) = repos
