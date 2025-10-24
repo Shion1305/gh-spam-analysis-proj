@@ -65,10 +65,13 @@ services:
     image: prom/prometheus:v2.48.0
     volumes:
       - ./obs/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./obs/alert.rules.yml:/etc/prometheus/alert.rules.yml:ro
     ports:
       - "9090:9090"
     depends_on:
       collector:
+        condition: service_started
+      alertmanager:
         condition: service_started
       api:
         condition: service_started
@@ -88,6 +91,17 @@ services:
     depends_on:
       prometheus:
         condition: service_started
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    env_file: .env
+    environment:
+      - ALERT_DISCORD_WEBHOOK_URL=${ALERT_DISCORD_WEBHOOK_URL}
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml", "--web.listen-address=:9093", "--config.expand-environment-variables"]
+    volumes:
+      - ./obs/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "9093:9093"
 
 volumes:
   postgres_data:

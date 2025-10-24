@@ -1,0 +1,6 @@
+route:
+  receiver: discord
+receivers:
+  - name: discord
+    webhook_configs:
+      - url: ${ALERT_DISCORD_WEBHOOK_URL}

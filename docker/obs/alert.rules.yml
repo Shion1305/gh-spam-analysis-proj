@@ -1,0 +1,21 @@
+groups:
+  - name: github-spam-lab
+    interval: 30s
+    rules:
+      - alert: CollectorJobError
+        expr: sum(collector_repository_job_status{status="error"}) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Collector job(s) in error state"
+          description: "One or more collection jobs are in error state."
+
+      - alert: CollectorJobFailed
+        expr: sum(collector_repository_job_status{status="failed"}) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Collector job(s) in failed state"
+          description: "One or more collection jobs recently failed (will retry)."
