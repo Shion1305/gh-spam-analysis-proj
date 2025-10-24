@@ -99,25 +99,28 @@ check:
 
 test: test-db-up
     trap 'docker stop {{test_db_name}} >/dev/null 2>&1 || docker rm -f {{test_db_name}} >/dev/null 2>&1 || true' EXIT; \
+    DATABASE_URL='{{test_database_url}}' sqlx migrate run >/dev/null 2>&1 || true; \
     if command -v cargo-nextest >/dev/null 2>&1; then \
-        TEST_ADMIN_URL='{{test_admin_url}}' DATABASE_URL='{{test_database_url}}' cargo nextest run --workspace; \
+        SQLX_OFFLINE=1 TEST_ADMIN_URL='{{test_admin_url}}' DATABASE_URL='{{test_database_url}}' cargo nextest run --workspace; \
     else \
-        TEST_ADMIN_URL='{{test_admin_url}}' DATABASE_URL='{{test_database_url}}' cargo test --workspace; \
+        SQLX_OFFLINE=1 TEST_ADMIN_URL='{{test_admin_url}}' DATABASE_URL='{{test_database_url}}' cargo test --workspace; \
     fi
 
 test-unit: test-db-up
-	if command -v cargo-nextest >/dev/null 2>&1; then \
-		TEST_ADMIN_URL='{{test_admin_url}}' DATABASE_URL='{{test_database_url}}' cargo nextest run --workspace --lib; \
-	else \
-		TEST_ADMIN_URL='{{test_admin_url}}' DATABASE_URL='{{test_database_url}}' cargo test --lib --workspace; \
-	fi
+    DATABASE_URL='{{test_database_url}}' sqlx migrate run >/dev/null 2>&1 || true; \
+    if command -v cargo-nextest >/dev/null 2>&1; then \
+        SQLX_OFFLINE=1 TEST_ADMIN_URL='{{test_admin_url}}' DATABASE_URL='{{test_database_url}}' cargo nextest run --workspace --lib; \
+    else \
+        SQLX_OFFLINE=1 TEST_ADMIN_URL='{{test_admin_url}}' DATABASE_URL='{{test_database_url}}' cargo test --lib --workspace; \
+    fi
 
 test-integration: test-db-up
-	if command -v cargo-nextest >/dev/null 2>&1; then \
-		TEST_ADMIN_URL='{{test_admin_url}}' DATABASE_URL='{{test_database_url}}' cargo nextest run --workspace --tests; \
-	else \
-		TEST_ADMIN_URL='{{test_admin_url}}' DATABASE_URL='{{test_database_url}}' cargo test --tests --workspace; \
-	fi
+    DATABASE_URL='{{test_database_url}}' sqlx migrate run >/dev/null 2>&1 || true; \
+    if command -v cargo-nextest >/dev/null 2>&1; then \
+        SQLX_OFFLINE=1 TEST_ADMIN_URL='{{test_admin_url}}' DATABASE_URL='{{test_database_url}}' cargo nextest run --workspace --tests; \
+    else \
+        SQLX_OFFLINE=1 TEST_ADMIN_URL='{{test_admin_url}}' DATABASE_URL='{{test_database_url}}' cargo test --tests --workspace; \
+    fi
 
 # Apps
 
@@ -131,4 +134,4 @@ ingest-once:
     COLLECTOR__RUN_ONCE=true cargo run -p collector
 
 dump-logs-collector:
-  docker compose -f docker/docker-compose.yml logs --tail=200 --no-color collector | sed -e 's/\x1b\[[0-9;]*m//g'
+  docker compose -f docker/docker-compose.yml logs --tail=20000 --no-color collector | sed -e 's/\x1b\[[0-9;]*m//g'

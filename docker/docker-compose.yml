@@ -49,12 +49,14 @@ services:
     environment:
       DATABASE__URL: postgres://postgres:postgres@postgres:5432/github_spam
       RUST_LOG: debug
-    command: ["/usr/local/bin/collector"]
+    command:
+      ["/bin/sh", "-c", "/usr/local/bin/collector --flags 2>&1 | tee -a /logs/logs.txt"]
     ports:
       - "9091:9091"
     volumes:
       - ../config:/srv/app/config:ro
       - ../scripts:/srv/app/scripts:ro
+      - ../logs:/logs
     depends_on:
       postgres:
         condition: service_healthy

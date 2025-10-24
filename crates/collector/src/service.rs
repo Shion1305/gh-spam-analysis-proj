@@ -18,6 +18,7 @@ use normalizer::payloads::UserRef;
 use serde::Deserialize;
 use tokio::time::sleep;
 use tracing::{info, instrument, warn};
+use thiserror::Error;
 
 use crate::client::GithubApiError;
 use crate::fetcher::{DataFetcher, UserFetch};
@@ -43,6 +44,13 @@ struct ProcessContext<'a> {
     session_counts: &'a mut HashMap<String, u32>,
     dedupe_counts: &'a mut HashMap<String, u32>,
     repo_full_name: &'a str,
+}
+
+#[derive(Debug, Error)]
+#[error("seed mismatch: expected '{expected}' but fetched '{actual}'")]
+struct SeedMismatchError {
+    expected: String,
+    actual: String,
 }
 
 impl Collector {
@@ -236,6 +244,19 @@ impl Collector {
             .fetch_repo(&seed.owner, &seed.name)
             .await
             .with_context(|| format!("fetching repo {}", seed.name))?;
+
+        // Guard against any mismatch between the requested seed and the fetched repository.
+        // This prevents accidentally upserting a different repository row (which can trip
+        // unique constraints on repositories.full_name and corrupt subsequent processing).
+        let expected_full_name = repo_full_name.to_lowercase();
+        let actual_full_name = repo_snapshot.repository.full_name.to_lowercase();
+        if expected_full_name != actual_full_name {
+            return Err(SeedMismatchError {
+                expected: repo_full_name,
+                actual: repo_snapshot.repository.full_name.clone(),
+            }
+            .into());
+        }
         let repo_row = to_repo_row(&repo_snapshot.repository);
         self.repos.repos().upsert(repo_row.clone()).await?;
         info!(full_name = %repo_row.full_name, "ingesting repository");
@@ -577,6 +598,10 @@ fn record_dedupe(counts: &mut HashMap<String, u32>, hash: &str) -> u32 {
 /// - Network errors - timeouts, connection issues
 /// - Other errors - parsing issues, etc.
 fn is_permanent_error(err: &anyhow::Error) -> bool {
+    // Explicitly treat seed mismatch as permanent to avoid useless retries
+    if err.downcast_ref::<SeedMismatchError>().is_some() {
+        return true;
+    }
     if let Some(status) = status_from_error(err) {
         match status {
             StatusCode::NOT_FOUND => {
