@@ -11,7 +11,7 @@ use once_cell::sync::Lazy;
 use prometheus::{register_int_gauge_vec, Encoder, IntGaugeVec};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use tracing::instrument;
 
 use crate::dto::{summarise_flags, IssueDto, RepoDto, SpammyUserDto, UserDto};
@@ -66,44 +66,50 @@ static USERS_BY_REPO: Lazy<IntGaugeVec> = Lazy::new(|| {
 
 async fn refresh_repo_entity_counts(pool: &PgPool) -> Result<(), String> {
     // Issues per repo
-    let issues = sqlx::query!(
+    let issues_rows = sqlx::query(
         r#"
         SELECT r.full_name as repo, COUNT(*)::BIGINT as count
         FROM issues i
         JOIN repositories r ON r.id = i.repo_id
         GROUP BY r.full_name
-        "#
+        "#,
     )
     .fetch_all(pool)
     .await
     .map_err(|e| e.to_string())?;
-    for row in &issues {
-        let repo: &str = &row.repo;
-        let cnt = row.count.unwrap_or(0);
+    for row in &issues_rows {
+        let repo: &str = row.try_get::<&str, _>("repo").unwrap_or("");
+        let cnt: i64 = row
+            .try_get::<Option<i64>, _>("count")
+            .unwrap_or(Some(0))
+            .unwrap_or(0);
         ISSUES_BY_REPO.with_label_values(&[repo]).set(cnt);
     }
 
     // Comments per repo
-    let comments = sqlx::query!(
+    let comments_rows = sqlx::query(
         r#"
         SELECT r.full_name as repo, COUNT(*)::BIGINT as count
         FROM comments c
         JOIN issues i ON i.id = c.issue_id
         JOIN repositories r ON r.id = i.repo_id
         GROUP BY r.full_name
-        "#
+        "#,
     )
     .fetch_all(pool)
     .await
     .map_err(|e| e.to_string())?;
-    for row in &comments {
-        let repo: &str = &row.repo;
-        let cnt = row.count.unwrap_or(0);
+    for row in &comments_rows {
+        let repo: &str = row.try_get::<&str, _>("repo").unwrap_or("");
+        let cnt: i64 = row
+            .try_get::<Option<i64>, _>("count")
+            .unwrap_or(Some(0))
+            .unwrap_or(0);
         COMMENTS_BY_REPO.with_label_values(&[repo]).set(cnt);
     }
 
     // Distinct users (issue authors + comment authors) per repo
-    let users = sqlx::query!(
+    let users_rows = sqlx::query(
         r#"
         WITH iu AS (
             SELECT r.full_name as repo, i.user_id as uid
@@ -126,14 +132,20 @@ async fn refresh_repo_entity_counts(pool: &PgPool) -> Result<(), String> {
         SELECT repo, COUNT(DISTINCT uid)::BIGINT AS count
         FROM allu
         GROUP BY repo
-        "#
+        "#,
     )
     .fetch_all(pool)
     .await
     .map_err(|e| e.to_string())?;
-    for row in &users {
-        let repo = row.repo.as_deref().unwrap_or("");
-        let cnt = row.count.unwrap_or(0);
+    for row in &users_rows {
+        let repo: &str = row
+            .try_get::<Option<&str>, _>("repo")
+            .unwrap_or(Some(""))
+            .unwrap_or("");
+        let cnt: i64 = row
+            .try_get::<Option<i64>, _>("count")
+            .unwrap_or(Some(0))
+            .unwrap_or(0);
         USERS_BY_REPO.with_label_values(&[repo]).set(cnt);
     }
 
