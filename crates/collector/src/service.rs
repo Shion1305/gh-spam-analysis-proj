@@ -62,7 +62,7 @@ impl Collector {
         Fut: std::future::Future<Output = Result<T>>,
     {
         let mut attempt: u32 = 0;
-        let max_attempts: u32 = 5;
+        let max_attempts: u32 = 15;
         let mut delay = std::time::Duration::from_secs(2);
         while attempt < max_attempts {
             match op().await {
@@ -78,7 +78,7 @@ impl Collector {
                         );
                         tokio::time::sleep(delay).await;
                         attempt += 1;
-                        delay = std::cmp::min(delay * 2, std::time::Duration::from_secs(30));
+                        delay = delay * 2;
                         continue;
                     }
                     return Err(err);
