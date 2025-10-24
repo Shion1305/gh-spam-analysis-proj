@@ -206,6 +206,44 @@ impl GithubBrokerBuilder {
             });
         }
 
+        // Background metrics refresh loop: propagate per-token and aggregated
+        // budget metrics even when no work is being processed.
+        {
+            let inner = inner.clone();
+            tokio::spawn(async move {
+                use tokio::time::{sleep, Duration};
+                loop {
+                    for budget in [Budget::Core, Budget::Search, Budget::Graphql] {
+                        // Aggregated totals
+                        let (limit_sum, remaining_sum) = inner.token_pool.totals(budget).await;
+                        metrics::BUDGET_LIMIT_TOTAL
+                            .with_label_values(&[budget_label(budget)])
+                            .set(limit_sum);
+                        metrics::BUDGET_REMAINING_TOTAL
+                            .with_label_values(&[budget_label(budget)])
+                            .set(remaining_sum);
+
+                        // Per-token gauges
+                        let ids = inner.token_pool.token_ids().await;
+                        for id in ids {
+                            if let Some((limit, remaining)) =
+                                inner.token_pool.get_numbers(budget, &id).await
+                            {
+                                metrics::RATE_LIMIT
+                                    .with_label_values(&[&id, budget_label(budget)])
+                                    .set(limit);
+                                metrics::RATE_REMAINING
+                                    .with_label_values(&[&id, budget_label(budget)])
+                                    .set(remaining);
+                            }
+                        }
+                    }
+
+                    sleep(Duration::from_secs(5)).await;
+                }
+            });
+        }
+
         Arc::new(LocalGithubBroker {
             inner,
             queues: senders,

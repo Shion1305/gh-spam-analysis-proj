@@ -164,4 +164,10 @@ impl TokenPool {
         }
         (limit_sum, remaining_sum)
     }
+
+    // Returns a snapshot of all token ids currently tracked.
+    pub async fn token_ids(&self) -> Vec<String> {
+        let guard = self.inner.lock().await;
+        guard.iter().map(|t| t.token.id.clone()).collect()
+    }
 }
