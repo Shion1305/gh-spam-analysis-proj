@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
+use axum::body::to_bytes;
 use axum::{http::Request, Router};
 use chrono::Utc;
 use db::models::{CollectionJobRow, CollectionStatus};
 use db::repositories::*;
-use axum::body::to_bytes;
 use serde_json::Value;
 use sqlx::PgPool;
 use tower::util::ServiceExt;
@@ -18,42 +18,98 @@ struct NoopRepo;
 
 #[async_trait::async_trait]
 impl RepoRepository for NoopRepo {
-    async fn upsert(&self, _repo: db::models::RepositoryRow) -> db::errors::Result<()> { panic!("unused") }
-    async fn get_by_full_name(&self, _full_name: &str) -> db::errors::Result<Option<db::models::RepositoryRow>> { panic!("unused") }
-    async fn list(&self, _limit: i64) -> db::errors::Result<Vec<db::models::RepositoryRow>> { panic!("unused") }
+    async fn upsert(&self, _repo: db::models::RepositoryRow) -> db::errors::Result<()> {
+        panic!("unused")
+    }
+    async fn get_by_full_name(
+        &self,
+        _full_name: &str,
+    ) -> db::errors::Result<Option<db::models::RepositoryRow>> {
+        panic!("unused")
+    }
+    async fn list(&self, _limit: i64) -> db::errors::Result<Vec<db::models::RepositoryRow>> {
+        panic!("unused")
+    }
 }
 
 #[async_trait::async_trait]
 impl UserRepository for NoopRepo {
-    async fn upsert(&self, _user: db::models::UserRow) -> db::errors::Result<()> { panic!("unused") }
-    async fn get_by_id(&self, _id: i64) -> db::errors::Result<Option<db::models::UserRow>> { panic!("unused") }
-    async fn get_by_login(&self, _login: &str) -> db::errors::Result<Option<db::models::UserRow>> { panic!("unused") }
+    async fn upsert(&self, _user: db::models::UserRow) -> db::errors::Result<()> {
+        panic!("unused")
+    }
+    async fn get_by_id(&self, _id: i64) -> db::errors::Result<Option<db::models::UserRow>> {
+        panic!("unused")
+    }
+    async fn get_by_login(&self, _login: &str) -> db::errors::Result<Option<db::models::UserRow>> {
+        panic!("unused")
+    }
 }
 
 #[async_trait::async_trait]
 impl IssueRepository for NoopRepo {
-    async fn upsert(&self, _issue: db::models::IssueRow) -> db::errors::Result<()> { panic!("unused") }
-    async fn query(&self, _query: db::models::IssueQuery) -> db::errors::Result<Vec<db::models::IssueRow>> { panic!("unused") }
-    async fn list_by_repo(&self, _repo_id: i64, _since: Option<chrono::DateTime<chrono::Utc>>) -> db::errors::Result<Vec<db::models::IssueRow>> { panic!("unused") }
+    async fn upsert(&self, _issue: db::models::IssueRow) -> db::errors::Result<()> {
+        panic!("unused")
+    }
+    async fn query(
+        &self,
+        _query: db::models::IssueQuery,
+    ) -> db::errors::Result<Vec<db::models::IssueRow>> {
+        panic!("unused")
+    }
+    async fn list_by_repo(
+        &self,
+        _repo_id: i64,
+        _since: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> db::errors::Result<Vec<db::models::IssueRow>> {
+        panic!("unused")
+    }
 }
 
 #[async_trait::async_trait]
 impl CommentRepository for NoopRepo {
-    async fn upsert(&self, _comment: db::models::CommentRow) -> db::errors::Result<()> { panic!("unused") }
-    async fn list_by_issue(&self, _issue_id: i64) -> db::errors::Result<Vec<db::models::CommentRow>> { panic!("unused") }
+    async fn upsert(&self, _comment: db::models::CommentRow) -> db::errors::Result<()> {
+        panic!("unused")
+    }
+    async fn list_by_issue(
+        &self,
+        _issue_id: i64,
+    ) -> db::errors::Result<Vec<db::models::CommentRow>> {
+        panic!("unused")
+    }
 }
 
 #[async_trait::async_trait]
 impl WatermarkRepository for NoopRepo {
-    async fn get(&self, _repo_full_name: &str) -> db::errors::Result<Option<db::models::CollectorWatermarkRow>> { panic!("unused") }
-    async fn set(&self, _watermark: db::models::WatermarkUpdate) -> db::errors::Result<()> { panic!("unused") }
+    async fn get(
+        &self,
+        _repo_full_name: &str,
+    ) -> db::errors::Result<Option<db::models::CollectorWatermarkRow>> {
+        panic!("unused")
+    }
+    async fn set(&self, _watermark: db::models::WatermarkUpdate) -> db::errors::Result<()> {
+        panic!("unused")
+    }
 }
 
 #[async_trait::async_trait]
 impl SpamFlagsRepository for NoopRepo {
-    async fn upsert(&self, _flag: db::models::SpamFlagUpsert) -> db::errors::Result<()> { panic!("unused") }
-    async fn list_for_subject(&self, _subject_type: &str, _subject_id: i64) -> db::errors::Result<Vec<db::models::SpamFlagRow>> { panic!("unused") }
-    async fn top_spammy_users(&self, _since: Option<chrono::DateTime<chrono::Utc>>, _limit: i64) -> db::errors::Result<Vec<db::models::ActorSpamSummary>> { panic!("unused") }
+    async fn upsert(&self, _flag: db::models::SpamFlagUpsert) -> db::errors::Result<()> {
+        panic!("unused")
+    }
+    async fn list_for_subject(
+        &self,
+        _subject_type: &str,
+        _subject_id: i64,
+    ) -> db::errors::Result<Vec<db::models::SpamFlagRow>> {
+        panic!("unused")
+    }
+    async fn top_spammy_users(
+        &self,
+        _since: Option<chrono::DateTime<chrono::Utc>>,
+        _limit: i64,
+    ) -> db::errors::Result<Vec<db::models::ActorSpamSummary>> {
+        panic!("unused")
+    }
 }
 
 #[derive(Clone)]
@@ -63,11 +119,24 @@ struct TestCollectionJobRepo {
 
 #[async_trait::async_trait]
 impl CollectionJobRepository for TestCollectionJobRepo {
-    async fn create(&self, _job: db::models::CollectionJobCreate) -> db::errors::Result<CollectionJobRow> { panic!("unused") }
-    async fn get_pending(&self, _limit: i32) -> db::errors::Result<Vec<CollectionJobRow>> { panic!("unused") }
-    async fn mark_in_progress(&self, _id: i64) -> db::errors::Result<()> { panic!("unused") }
-    async fn update(&self, _update: db::models::CollectionJobUpdate) -> db::errors::Result<()> { panic!("unused") }
-    async fn list(&self, _limit: i32) -> db::errors::Result<Vec<CollectionJobRow>> { Ok(self.jobs.clone()) }
+    async fn create(
+        &self,
+        _job: db::models::CollectionJobCreate,
+    ) -> db::errors::Result<CollectionJobRow> {
+        panic!("unused")
+    }
+    async fn get_pending(&self, _limit: i32) -> db::errors::Result<Vec<CollectionJobRow>> {
+        panic!("unused")
+    }
+    async fn mark_in_progress(&self, _id: i64) -> db::errors::Result<()> {
+        panic!("unused")
+    }
+    async fn update(&self, _update: db::models::CollectionJobUpdate) -> db::errors::Result<()> {
+        panic!("unused")
+    }
+    async fn list(&self, _limit: i32) -> db::errors::Result<Vec<CollectionJobRow>> {
+        Ok(self.jobs.clone())
+    }
 }
 
 #[derive(Clone)]
@@ -82,13 +151,27 @@ struct TestRepos {
 }
 
 impl Repositories for TestRepos {
-    fn repos(&self) -> &dyn RepoRepository { &self.repos }
-    fn users(&self) -> &dyn UserRepository { &self.users }
-    fn issues(&self) -> &dyn IssueRepository { &self.issues }
-    fn comments(&self) -> &dyn CommentRepository { &self.comments }
-    fn watermarks(&self) -> &dyn WatermarkRepository { &self.watermarks }
-    fn spam_flags(&self) -> &dyn SpamFlagsRepository { &self.spam }
-    fn collection_jobs(&self) -> &dyn CollectionJobRepository { &self.jobs }
+    fn repos(&self) -> &dyn RepoRepository {
+        &self.repos
+    }
+    fn users(&self) -> &dyn UserRepository {
+        &self.users
+    }
+    fn issues(&self) -> &dyn IssueRepository {
+        &self.issues
+    }
+    fn comments(&self) -> &dyn CommentRepository {
+        &self.comments
+    }
+    fn watermarks(&self) -> &dyn WatermarkRepository {
+        &self.watermarks
+    }
+    fn spam_flags(&self) -> &dyn SpamFlagsRepository {
+        &self.spam
+    }
+    fn collection_jobs(&self) -> &dyn CollectionJobRepository {
+        &self.jobs
+    }
 }
 
 fn mk_job(id: i64, status: CollectionStatus, err: Option<&str>) -> CollectionJobRow {
@@ -101,8 +184,16 @@ fn mk_job(id: i64, status: CollectionStatus, err: Option<&str>) -> CollectionJob
         status: status.clone(),
         priority: 10,
         last_attempt_at: Some(now),
-        last_completed_at: if matches!(status, CollectionStatus::Completed) { Some(now) } else { None },
-        failure_count: if matches!(status, CollectionStatus::Completed) { 0 } else { 1 },
+        last_completed_at: if matches!(status, CollectionStatus::Completed) {
+            Some(now)
+        } else {
+            None
+        },
+        failure_count: if matches!(status, CollectionStatus::Completed) {
+            0
+        } else {
+            1
+        },
         error_message: err.map(|s| s.to_string()),
         created_at: now,
         updated_at: now,
@@ -120,7 +211,8 @@ async fn setup_app(jobs: Vec<CollectionJobRow>) -> Router {
         jobs: TestCollectionJobRepo { jobs },
     });
 
-    let pool = PgPool::connect_lazy("postgres://postgres:postgres@localhost:5432/github_spam").expect("lazy pool");
+    let pool = PgPool::connect_lazy("postgres://postgres:postgres@localhost:5432/github_spam")
+        .expect("lazy pool");
     let state = Arc::new(ApiState {
         repositories: repos,
         metrics_path: "/metrics",
@@ -140,7 +232,11 @@ async fn collection_jobs_includes_error_and_timestamps() {
     let app = setup_app(jobs).await;
 
     let res = app
-        .oneshot(Request::get("/collection-jobs?limit=10").body(axum::body::Body::empty()).unwrap())
+        .oneshot(
+            Request::get("/collection-jobs?limit=10")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert!(res.status().is_success());
@@ -158,7 +254,10 @@ async fn collection_jobs_includes_error_and_timestamps() {
     // Failed: error_message shown
     let j2 = &arr[1];
     assert_eq!(j2.get("status").unwrap().as_str().unwrap(), "Failed");
-    assert_eq!(j2.get("error_message").unwrap().as_str().unwrap(), "network timeout");
+    assert_eq!(
+        j2.get("error_message").unwrap().as_str().unwrap(),
+        "network timeout"
+    );
 
     // Error: error_message truncated with ellipsis
     let j3 = &arr[2];

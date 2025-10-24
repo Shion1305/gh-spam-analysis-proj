@@ -380,7 +380,10 @@ async fn list_collection_jobs(
     Ok(Json(response))
 }
 
-fn displayable_error(status: &db::models::CollectionStatus, message: Option<&str>) -> Option<String> {
+fn displayable_error(
+    status: &db::models::CollectionStatus,
+    message: Option<&str>,
+) -> Option<String> {
     use db::models::CollectionStatus as S;
     match status {
         S::Failed | S::Error => message.map(|m| truncate(m, 512)),
@@ -389,7 +392,9 @@ fn displayable_error(status: &db::models::CollectionStatus, message: Option<&str
 }
 
 fn truncate(msg: &str, max: usize) -> String {
-    if msg.len() <= max { return msg.to_string(); }
+    if msg.len() <= max {
+        return msg.to_string();
+    }
     let mut s: String = msg.chars().take(max).collect();
     s.push('…');
     s
