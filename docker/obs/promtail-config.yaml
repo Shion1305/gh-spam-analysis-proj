@@ -1,0 +1,23 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # Tail local app log files synced from containers
+  - job_name: gh-app-file
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: gh-app
+          __path__: /var/log/gh/*.txt
+    pipeline_stages:
+      - regex:
+          expression: '^(?s)(?P<msg>.*)$'
+      - labels:
+          job:

@@ -10,6 +10,23 @@ processors:
 exporters:
   logging:
     verbosity: normal
+  loki:
+    endpoint: http://loki:3100/loki/api/v1/push
+    tls:
+      insecure: true
+    default_labels_enabled:
+      exporter: false
+      instance: false
+      job: true
+    labels:
+      resource:
+        - service.name
+      attributes:
+        - level
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
 
 service:
   telemetry:
@@ -19,7 +36,7 @@ service:
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [logging]
+      exporters: [logging, otlp/tempo]
     metrics:
       receivers: [otlp]
       processors: [batch]
@@ -27,5 +44,4 @@ service:
     logs:
       receivers: [otlp]
       processors: [batch]
-      exporters: [logging]
-
+      exporters: [logging, loki]

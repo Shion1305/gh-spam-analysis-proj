@@ -33,7 +33,6 @@ services:
     environment:
       DATABASE__URL: postgres://postgres:postgres@postgres:5432/github_spam
       API__BIND: 0.0.0.0:3000
-      RUST_LOG: debug
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
       OTEL_SERVICE_NAME: api
@@ -42,6 +41,9 @@ services:
     volumes:
       - ../config:/srv/app/config:ro
       - ../scripts:/srv/app/scripts:ro
+      - ../logs:/logs
+    command:
+      ["/bin/sh", "-c", "/usr/local/bin/api 2>&1 | tee -a /logs/api.log"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -53,7 +55,6 @@ services:
     env_file: .env
     environment:
       DATABASE__URL: postgres://postgres:postgres@postgres:5432/github_spam
-      RUST_LOG: debug
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
       OTEL_SERVICE_NAME: collector
@@ -97,12 +98,23 @@ services:
       - "8888:8888"   # Collector metrics
       - "13133:13133" # Health check
     healthcheck:
-      test: ["CMD", "/otelcontribcol", "--version"]
+      test: ["CMD", "/otelcol-contrib", "--version"]
       interval: 30s
       timeout: 5s
       retries: 3
     depends_on:
       postgres:
+        condition: service_started
+
+  tempo:
+    image: grafana/tempo:2.5.0
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./obs/tempo.yaml:/etc/tempo.yaml:ro
+    ports:
+      - "3200:3200" # Tempo HTTP API
+    depends_on:
+      otel-collector:
         condition: service_started
 
   grafana:
@@ -123,6 +135,10 @@ services:
     depends_on:
       prometheus:
         condition: service_started
+      tempo:
+        condition: service_started
+      loki:
+        condition: service_started
 
   alertmanager:
     image: prom/alertmanager:v0.27.0
@@ -134,6 +150,24 @@ services:
       - ./obs/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
     ports:
       - "9093:9093"
+
+  loki:
+    image: grafana/loki:2.9.7
+    command: ["-config.file=/etc/loki/config.yml"]
+    volumes:
+      - ./obs/loki-config.yaml:/etc/loki/config.yml:ro
+    ports:
+      - "3100:3100"
+
+  promtail:
+    image: grafana/promtail:2.9.7
+    command: ["-config.file=/etc/promtail/config.yml"]
+    volumes:
+      - ./obs/promtail-config.yaml:/etc/promtail/config.yml:ro
+      - ../logs:/var/log/gh:ro
+    depends_on:
+      loki:
+        condition: service_started
 
 volumes:
   postgres_data:
