@@ -9,7 +9,7 @@ license.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
-common = { path = "../common" }
+common = { path = "../common", features = ["otel"] }
 db = { path = "../db" }
 futures.workspace = true
 gh_broker = { path = "../gh_broker" }
