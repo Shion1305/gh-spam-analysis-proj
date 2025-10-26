@@ -51,3 +51,7 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter", "fmt"] }
 uuid = { version = "1.6.1", features = ["v4", "serde", "fast-rng"] }
 url = "2.4.1"
 base64 = "0.21.7"
+tracing-opentelemetry = "0.23"
+opentelemetry = { version = "0.22", features = ["trace"] }
+opentelemetry_sdk = { version = "0.22.1", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.15", features = ["grpc-tonic"] }

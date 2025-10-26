@@ -10,7 +10,7 @@ use tracing::info;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    logging::init_logging("info");
+    logging::init_tracing("api", "info");
     let config = AppConfig::load()?;
     let database = Arc::new(PgDatabase::connect(&config.database.url).await?);
     let repositories: Arc<dyn Repositories> = database.clone();
@@ -27,5 +27,7 @@ async fn main() -> Result<()> {
     info!("api listening on {}", addr);
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
+    // Ensure any remaining spans are flushed on shutdown (no-op if otel disabled)
+    common::logging::shutdown_tracer_provider();
     Ok(())
 }

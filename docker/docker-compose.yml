@@ -34,6 +34,9 @@ services:
       DATABASE__URL: postgres://postgres:postgres@postgres:5432/github_spam
       API__BIND: 0.0.0.0:3000
       RUST_LOG: debug
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_SERVICE_NAME: api
     ports:
       - "3000:3000"
     volumes:
@@ -42,6 +45,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      otel-collector:
+        condition: service_started
 
   collector:
     image: gh-spam-lab:latest
@@ -49,6 +54,9 @@ services:
     environment:
       DATABASE__URL: postgres://postgres:postgres@postgres:5432/github_spam
       RUST_LOG: debug
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_SERVICE_NAME: collector
     command:
       ["/bin/sh", "-c", "/usr/local/bin/collector --flags 2>&1 | tee -a /logs/logs.txt"]
     ports:
@@ -60,6 +68,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      otel-collector:
+        condition: service_started
 
   prometheus:
     image: prom/prometheus:v2.48.0
@@ -74,6 +84,25 @@ services:
       alertmanager:
         condition: service_started
       api:
+        condition: service_started
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.103.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./obs/otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+      - "8888:8888"   # Collector metrics
+      - "13133:13133" # Health check
+    healthcheck:
+      test: ["CMD", "/otelcontribcol", "--version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      postgres:
         condition: service_started
 
   grafana:

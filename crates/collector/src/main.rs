@@ -24,7 +24,7 @@ use tracing::{info, warn};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    logging::init_logging("info");
+    logging::init_tracing("collector", "info");
     let config = AppConfig::load()?;
     let tokens = config.github.resolved_tokens()?;
     if tokens.is_empty() {
@@ -101,6 +101,8 @@ async fn main() -> Result<()> {
         "collector started"
     );
     collector.run().await?;
+    // Ensure any remaining spans are flushed on shutdown (no-op if otel disabled)
+    common::logging::shutdown_tracer_provider();
     Ok(())
 }
 
