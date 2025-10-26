@@ -129,6 +129,77 @@ query RepoIssues(
 }
 "#;
 
+const PULLS_QUERY: &str = r#"
+query RepoPulls(
+  $owner: String!,
+  $name: String!,
+  $perPage: Int!,
+  $commentsPerPage: Int!,
+  $cursor: String
+) {
+  rateLimit { limit remaining resetAt used cost }
+  repository(owner: $owner, name: $name) {
+    databaseId
+    nameWithOwner
+    pullRequests(
+      first: $perPage,
+      after: $cursor,
+      orderBy: { field: UPDATED_AT, direction: DESC }
+    ) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        databaseId
+        number
+        title
+        body
+        state
+        createdAt
+        updatedAt
+        closedAt
+        author {
+          __typename
+          login
+          ... on User {
+            databaseId
+            isSiteAdmin
+            createdAt
+            followers { totalCount }
+            following { totalCount }
+            repositories(privacy: PUBLIC) { totalCount }
+          }
+          ... on Bot { databaseId createdAt }
+          ... on Organization { databaseId createdAt }
+        }
+        comments(first: $commentsPerPage, orderBy: { field: UPDATED_AT, direction: ASC }) {
+          totalCount
+          pageInfo { hasNextPage endCursor }
+          nodes {
+            databaseId
+            body
+            createdAt
+            updatedAt
+            author {
+              __typename
+              login
+              ... on User {
+                databaseId
+                isSiteAdmin
+                createdAt
+                followers { totalCount }
+                following { totalCount }
+                repositories(privacy: PUBLIC) { totalCount }
+              }
+              ... on Bot { databaseId createdAt }
+              ... on Organization { databaseId createdAt }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"#;
+
 const ISSUE_COMMENTS_QUERY: &str = r#"
 query IssueComments(
   $owner: String!,
@@ -173,6 +244,49 @@ query IssueComments(
               databaseId
               createdAt
             }
+          }
+        }
+      }
+    }
+  }
+}
+"#;
+
+const PR_COMMENTS_QUERY: &str = r#"
+query PRComments(
+  $owner: String!,
+  $name: String!,
+  $number: Int!,
+  $perPage: Int!,
+  $cursor: String
+) {
+  rateLimit { limit remaining resetAt used cost }
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      comments(
+        first: $perPage,
+        after: $cursor,
+        orderBy: { field: UPDATED_AT, direction: ASC }
+      ) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          databaseId
+          body
+          createdAt
+          updatedAt
+          author {
+            __typename
+            login
+            ... on User {
+              databaseId
+              isSiteAdmin
+              createdAt
+              followers { totalCount }
+              following { totalCount }
+              repositories(privacy: PUBLIC) { totalCount }
+            }
+            ... on Bot { databaseId createdAt }
+            ... on Organization { databaseId createdAt }
           }
         }
       }
@@ -539,9 +653,35 @@ impl DataFetcher for GraphqlDataFetcher {
         let op = "issues";
         let per_page = per_page.min(100);
         let comments_per_page = per_page;
-        let since_value = since.map(|dt| dt.to_rfc3339());
+        // Combined cursor format: "i:<issueCursor>|p:<prCursor>" (either may be empty)
+        let (issue_cur, pr_cur) = match cursor.as_deref() {
+            Some(cur) if cur.starts_with("i:") || cur.contains("|p:") => {
+                let mut ic: Option<String> = None;
+                let mut pc: Option<String> = None;
+                for part in cur.split('|') {
+                    if let Some(rest) = part.strip_prefix("i:") {
+                        ic = if rest.is_empty() {
+                            None
+                        } else {
+                            Some(rest.to_string())
+                        };
+                    }
+                    if let Some(rest) = part.strip_prefix("p:") {
+                        pc = if rest.is_empty() {
+                            None
+                        } else {
+                            Some(rest.to_string())
+                        };
+                    }
+                }
+                (ic, pc)
+            }
+            other => (other.map(|s| s.to_string()), None),
+        };
+
+        // Fetch issues page
         let start = Instant::now();
-        let response = self
+        let issues_resp = self
             .execute_graphql(
                 "issues",
                 ISSUES_QUERY,
@@ -550,36 +690,74 @@ impl DataFetcher for GraphqlDataFetcher {
                     "name": name,
                     "perPage": per_page as i64,
                     "commentsPerPage": comments_per_page as i64,
-                    "cursor": cursor,
-                    "since": since_value,
+                    "cursor": issue_cur,
+                    "since": since.map(|dt| dt.to_rfc3339()),
                 }),
             )
             .await;
-        let elapsed = start.elapsed().as_secs_f64();
-        let response = match response {
+        let issues_elapsed = start.elapsed().as_secs_f64();
+        let issues_resp = match issues_resp {
             Ok(v) => {
                 metrics::FETCH_REQUESTS_TOTAL
-                    .with_label_values(&["graphql", op, "success"])
+                    .with_label_values(&["graphql", "issues", "success"])
                     .inc();
                 metrics::FETCH_LATENCY_SECONDS
-                    .with_label_values(&["graphql", op])
-                    .observe(elapsed);
+                    .with_label_values(&["graphql", "issues"])
+                    .observe(issues_elapsed);
                 v
             }
             Err(e) => {
                 metrics::FETCH_REQUESTS_TOTAL
-                    .with_label_values(&["graphql", op, "error"])
+                    .with_label_values(&["graphql", "issues", "error"])
                     .inc();
                 metrics::FETCH_LATENCY_SECONDS
-                    .with_label_values(&["graphql", op])
-                    .observe(elapsed);
+                    .with_label_values(&["graphql", "issues"])
+                    .observe(issues_elapsed);
                 return Err(e);
             }
         };
 
-        let repository = self.extract_repository(&response, owner, name)?;
+        // Fetch PRs page
+        let start2 = Instant::now();
+        let pulls_resp = self
+            .execute_graphql(
+                "pulls",
+                PULLS_QUERY,
+                json!({
+                    "owner": owner,
+                    "name": name,
+                    "perPage": per_page as i64,
+                    "commentsPerPage": comments_per_page as i64,
+                    "cursor": pr_cur,
+                }),
+            )
+            .await;
+        let pulls_elapsed = start2.elapsed().as_secs_f64();
+        let pulls_resp = match pulls_resp {
+            Ok(v) => {
+                metrics::FETCH_REQUESTS_TOTAL
+                    .with_label_values(&["graphql", "pulls", "success"])
+                    .inc();
+                metrics::FETCH_LATENCY_SECONDS
+                    .with_label_values(&["graphql", "pulls"])
+                    .observe(pulls_elapsed);
+                v
+            }
+            Err(e) => {
+                metrics::FETCH_REQUESTS_TOTAL
+                    .with_label_values(&["graphql", "pulls", "error"])
+                    .inc();
+                metrics::FETCH_LATENCY_SECONDS
+                    .with_label_values(&["graphql", "pulls"])
+                    .observe(pulls_elapsed);
+                return Err(e);
+            }
+        };
 
-        let issues_conn = repository
+        let repo_issues = self.extract_repository(&issues_resp, owner, name)?;
+        let repo_pulls = self.extract_repository(&pulls_resp, owner, name)?;
+
+        let issues_conn = repo_issues
             .get("issues")
             .and_then(Value::as_object)
             .ok_or_else(|| anyhow!("missing issues connection"))?;
@@ -591,6 +769,26 @@ impl DataFetcher for GraphqlDataFetcher {
             .unwrap_or(false);
         let next_cursor = if has_next {
             issues_conn
+                .get("pageInfo")
+                .and_then(|p| p.get("endCursor"))
+                .and_then(Value::as_str)
+                .map(|s| s.to_string())
+        } else {
+            None
+        };
+
+        let pulls_conn = repo_pulls
+            .get("pullRequests")
+            .and_then(Value::as_object)
+            .ok_or_else(|| anyhow!("missing pullRequests connection"))?;
+
+        let pulls_has_next = pulls_conn
+            .get("pageInfo")
+            .and_then(|p| p.get("hasNextPage"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let pulls_cursor = if pulls_has_next {
+            pulls_conn
                 .get("pageInfo")
                 .and_then(|p| p.get("endCursor"))
                 .and_then(Value::as_str)
@@ -689,10 +887,111 @@ impl DataFetcher for GraphqlDataFetcher {
             }
         }
 
+        if let Some(nodes) = pulls_conn.get("nodes").and_then(Value::as_array) {
+            for node in nodes.iter().filter(|node| !node.is_null()) {
+                let actor_info = self.parse_actor(node.get("author").unwrap_or(&Value::Null))?;
+                if let Some(user) = actor_info.normalized_user.clone() {
+                    self.cache_user(user).await;
+                }
+                let pr_id = node
+                    .get("databaseId")
+                    .and_then(Value::as_i64)
+                    .ok_or_else(|| anyhow!("missing pr databaseId"))?;
+                let pr_number = node
+                    .get("number")
+                    .and_then(Value::as_i64)
+                    .ok_or_else(|| anyhow!("missing pr number"))?;
+                let title = node
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                let body = node.get("body").and_then(Value::as_str);
+                let state_raw = node.get("state").and_then(Value::as_str).unwrap_or("OPEN");
+                let state = match state_raw {
+                    "MERGED" => "closed".to_string(),
+                    other => other.to_lowercase(),
+                };
+                let created_at = node
+                    .get("createdAt")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| anyhow!("missing pr createdAt"))?;
+                let updated_at = node
+                    .get("updatedAt")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| anyhow!("missing pr updatedAt"))?;
+                let closed_at =
+                    node.get("closedAt")
+                        .and_then(|v| if v.is_null() { None } else { v.as_str() });
+                let comments_conn = node
+                    .get("comments")
+                    .ok_or_else(|| anyhow!("missing pr comments connection"))?;
+                let comments_total = comments_conn
+                    .get("totalCount")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0);
+
+                let pull_request_value = Some(json!({"present": true}));
+                let user_value = actor_info.user_ref.as_ref().map(user_ref_to_value);
+                let issue_value = json!({
+                    "id": pr_id,
+                    "number": pr_number,
+                    "pull_request": pull_request_value,
+                    "state": state,
+                    "title": title,
+                    "body": body,
+                    "user": user_value,
+                    "comments": comments_total,
+                    "created_at": created_at,
+                    "updated_at": updated_at,
+                    "closed_at": closed_at,
+                });
+                let payload: IssuePayload = serde_json::from_value(issue_value.clone())?;
+                let normalized =
+                    normalizer::normalize_issue(&payload, repo_id, issue_value.clone());
+
+                let (comment_records, comment_cursor) = self
+                    .collect_comment_records(comments_conn, normalized.id)
+                    .await?;
+                if !comment_records.is_empty() || comment_cursor.is_some() {
+                    let key = IssueKey::new(owner, name, pr_number);
+                    self.store_initial_comments(
+                        key,
+                        CommentCacheEntry {
+                            items: comment_records,
+                            next_cursor: comment_cursor,
+                        },
+                    )
+                    .await;
+                }
+
+                items.push(IssueRecord {
+                    issue: normalized,
+                    author: payload.user.clone(),
+                });
+            }
+        }
+
+        // Sort items by updated_at desc (best-effort)
+        items.sort_by(|a, b| b.issue.updated_at.cmp(&a.issue.updated_at));
+
+        let combined_cursor = if next_cursor.is_some() || pulls_cursor.is_some() {
+            Some(format!(
+                "i:{}|p:{}",
+                next_cursor.clone().unwrap_or_default(),
+                pulls_cursor.clone().unwrap_or_default()
+            ))
+        } else {
+            None
+        };
+
         metrics::FETCH_ITEMS_TOTAL
             .with_label_values(&["graphql", op])
             .inc_by(items.len() as u64);
-        Ok(IssuePage { items, next_cursor })
+        Ok(IssuePage {
+            items,
+            next_cursor: combined_cursor,
+        })
     }
 
     async fn fetch_issue_comments(
@@ -753,25 +1052,48 @@ impl DataFetcher for GraphqlDataFetcher {
         };
 
         let repository = self.extract_repository(&response, owner, name)?;
-        let issue_value = repository
-            .get("issue")
-            .ok_or_else(|| anyhow!("missing issue field in GraphQL response"))?;
-        if issue_value.is_null() {
-            // Issue not found; treat as benign skip (empty comments page)
-            metrics::FETCH_REQUESTS_TOTAL
-                .with_label_values(&["graphql", op, "success"])
-                .inc();
-            metrics::FETCH_LATENCY_SECONDS
-                .with_label_values(&["graphql", op])
-                .observe(elapsed);
-            crate::metrics::ISSUES_404_SKIPS_TOTAL.inc();
-            return Ok(CommentPage {
-                items: Vec::new(),
-                next_cursor: None,
-            });
+        // Use an owned JSON node to avoid borrowing from temporary values across await points.
+        let mut node_owned: Option<Value> = repository.get("issue").cloned();
+        if node_owned.as_ref().map(|v| v.is_null()).unwrap_or(true) {
+            // Try PR comments
+            let start_pr = Instant::now();
+            let pr_resp = self
+                .execute_graphql(
+                    "comments",
+                    PR_COMMENTS_QUERY,
+                    json!({
+                        "owner": owner,
+                        "name": name,
+                        "number": issue_number,
+                        "perPage": per_page as i64,
+                        "cursor": cursor,
+                    }),
+                )
+                .await?;
+            let _ = start_pr.elapsed().as_secs_f64();
+            // Clone the pullRequest node so it is owned locally.
+            node_owned = self
+                .extract_repository(&pr_resp, owner, name)?
+                .get("pullRequest")
+                .cloned();
+            if node_owned.as_ref().map(|v| v.is_null()).unwrap_or(true) {
+                metrics::FETCH_REQUESTS_TOTAL
+                    .with_label_values(&["graphql", op, "success"])
+                    .inc();
+                metrics::FETCH_LATENCY_SECONDS
+                    .with_label_values(&["graphql", op])
+                    .observe(elapsed);
+                crate::metrics::ISSUES_404_SKIPS_TOTAL.inc();
+                return Ok(CommentPage {
+                    items: Vec::new(),
+                    next_cursor: None,
+                });
+            }
         }
 
-        let comments_conn = issue_value
+        let comments_conn = node_owned
+            .as_ref()
+            .expect("node must exist")
             .get("comments")
             .ok_or_else(|| anyhow!("missing comments connection"))?;
 
