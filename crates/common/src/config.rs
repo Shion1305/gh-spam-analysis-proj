@@ -124,18 +124,13 @@ impl CollectorConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum FetchMode {
     Rest,
     Graphql,
+    #[default]
     Hybrid,
-}
-
-impl Default for FetchMode {
-    fn default() -> Self {
-        Self::Hybrid
-    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
