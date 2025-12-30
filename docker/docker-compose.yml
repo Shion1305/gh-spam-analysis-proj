@@ -157,7 +157,7 @@ services:
     volumes:
       - ./obs/loki-config.yaml:/etc/loki/config.yml:ro
     ports:
-      - "3100:3100"
+      - "3101:3100"
 
   promtail:
     image: grafana/promtail:2.9.7

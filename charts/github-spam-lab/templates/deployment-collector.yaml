@@ -25,8 +25,31 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["/usr/local/bin/collector"]
           env:
-            - name: DATABASE_URL
-              value: {{ printf "postgres://%s:%s@%s:%d/%s" .Values.postgres.user .Values.postgres.password .Values.postgres.host .Values.postgres.port .Values.postgres.database | quote }}
+            {{- if .Values.postgres.existingSecret }}
+            - name: DATABASE__URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.existingSecret }}
+                  key: {{ .Values.postgres.existingSecretKey | default "DATABASE__URL" | quote }}
+            {{- end }}
+            # GitHub authentication (see docker/.env.example)
+            {{- if .Values.github.existingSecret }}
+            - name: GITHUB__TOKEN_IDS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.github.existingSecret }}
+                  key: {{ .Values.github.tokenIdsKey | default "GITHUB__TOKEN_IDS" | quote }}
+            - name: GITHUB__TOKEN_SECRETS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.github.existingSecret }}
+                  key: {{ .Values.github.tokenSecretsKey | default "GITHUB__TOKEN_SECRETS" | quote }}
+            - name: GITHUB__USER_AGENT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.github.existingSecret }}
+                  key: {{ .Values.github.userAgentKey | default "GITHUB__USER_AGENT" | quote }}
+            {{- end }}
             {{- range .Values.collector.env }}
             - {{- toYaml . | nindent 12 }}
             {{- end }}

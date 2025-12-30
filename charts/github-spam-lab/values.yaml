@@ -3,6 +3,7 @@ image:
   tag: "latest"
   pullPolicy: IfNotPresent
 
+# API configuration
 api:
   replicaCount: 1
   service:
@@ -21,19 +22,33 @@ api:
             pathType: Prefix
     tls: []
 
+# Collector configuration
 collector:
   enabled: true
   replicaCount: 1
   env: []
   resources: {}
 
+# Postgres configuration
 postgres:
-  host: postgres
-  port: 5432
-  user: postgres
-  password: postgres
-  database: github_spam
+  # Name of an existing Secret that contains the database URL.
+  # The Secret should contain the full connection string under `existingSecretKey`.
+  # Example key name (matching docker/.env.example): "DATABASE__URL".
   existingSecret: ""
+  existingSecretKey: "DATABASE__URL"
+
+# GitHub token configuration
+# Tokens should be provided via a Kubernetes Secret.
+github:
+  # Name of an existing Secret containing GitHub token configuration.
+  # The secret is expected to have keys for:
+  # - token IDs (`github.tokenIdsKey`, default: "GITHUB__TOKEN_IDS")
+  # - token secrets (`github.tokenSecretsKey`, default: "GITHUB__TOKEN_SECRETS")
+  # - user agent (`github.userAgentKey`, default: "GITHUB__USER_AGENT")
+  existingSecret: ""
+  tokenIdsKey: "GITHUB__TOKEN_IDS"
+  tokenSecretsKey: "GITHUB__TOKEN_SECRETS"
+  userAgentKey: "GITHUB__USER_AGENT"
 
 extraEnv: []
 fullnameOverride: ""

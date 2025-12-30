@@ -29,8 +29,15 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["/usr/local/bin/api"]
           env:
-            - name: DATABASE_URL
-              value: {{ printf "postgres://%s:%s@%s:%d/%s" .Values.postgres.user .Values.postgres.password .Values.postgres.host .Values.postgres.port .Values.postgres.database | quote }}
+            {{- if .Values.postgres.existingSecret }}
+            - name: DATABASE__URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.existingSecret }}
+                  key: {{ .Values.postgres.existingSecretKey | default "DATABASE__URL" | quote }}
+            {{- end }}
+            - name: API__BIND
+              value: {{ printf "0.0.0.0:%d" .Values.api.service.port | quote }}
             {{- range .Values.api.env }}
             - {{- toYaml . | nindent 14 }}
             {{- end }}

@@ -9,7 +9,7 @@
 #   - all
 registries:
 - type: standard
-  ref: v4.428.0  # renovate: depName=aquaproj/aqua-registry
+  ref: v4.428.0 # renovate: depName=aquaproj/aqua-registry
 packages:
   - name: casey/just@1.23.0
   - name: launchbadge/sqlx-cli@v0.7.3
@@ -17,3 +17,4 @@ packages:
   - name: redis/redis@7.2.0
   - name: edenhill/kcat@1.7.1
   - name: prometheus/prometheus@v2.48.0
+  - name: direnv/direnv@v2.37.1
