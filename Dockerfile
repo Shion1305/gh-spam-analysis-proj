@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.6
 
-ARG RUST_VERSION=1.84
+ARG RUST_VERSION=1.82
 
 FROM rust:${RUST_VERSION} AS chef
 WORKDIR /app
