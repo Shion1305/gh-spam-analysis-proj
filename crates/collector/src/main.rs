@@ -4,8 +4,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
-use axum::http::{header, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::http::header;
+use axum::http::StatusCode;
+use axum::response::Response;
 use axum::routing::get;
 use axum::{Json, Router};
 use collector::{
@@ -21,6 +22,7 @@ use db::Repositories;
 use gh_broker::{Budget, GithubBrokerBuilder, GithubToken as BrokerToken, Priority};
 use prometheus::Encoder;
 use serde::Serialize;
+use serde_json::Value;
 use tracing::{info, warn};
 
 #[tokio::main]
@@ -209,26 +211,21 @@ async fn export_metrics() -> Response {
     let metric_families = prometheus::gather();
     let mut buffer = Vec::new();
 
-    match encoder.encode(&metric_families, &mut buffer) {
-        Ok(()) => {
-            let content_type = encoder.format_type().to_string();
-            (
-                StatusCode::OK,
-                [(header::CONTENT_TYPE, content_type)],
-                buffer,
-            )
-                .into_response()
-        }
-        Err(err) => {
-            warn!(error = ?err, "failed to encode collector metrics");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                [(header::CONTENT_TYPE, "text/plain".to_string())],
-                b"failed to encode metrics".to_vec(),
-            )
-                .into_response()
-        }
+    if let Err(err) = encoder.encode(&metric_families, &mut buffer) {
+        warn!(error = ?err, "failed to encode collector metrics");
+        let mut res = Response::new(axum::body::Body::from("failed to encode metrics"));
+        *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+        res.headers_mut()
+            .insert(header::CONTENT_TYPE, "text/plain".parse().unwrap());
+        return res;
     }
+
+    let content_type = encoder.format_type().to_string();
+    let mut res = Response::new(axum::body::Body::from(buffer));
+    *res.status_mut() = StatusCode::OK;
+    res.headers_mut()
+        .insert(header::CONTENT_TYPE, content_type.parse().unwrap());
+    res
 }
 
 #[derive(Debug, Serialize)]
@@ -245,66 +242,102 @@ struct RateLimitsResponse {
 }
 
 async fn rate_limits() -> Json<RateLimitsResponse> {
-    use std::collections::HashMap;
+    let config = match AppConfig::load() {
+        Ok(c) => c,
+        Err(_err) => {
+            return Json(RateLimitsResponse {
+                tokens: vec![TokenRateLimit {
+                    token: "<config-error>".to_string(),
+                    budget: "n/a".to_string(),
+                    limit: 0,
+                    remaining: 0,
+                }],
+            })
+        }
+    };
 
-    let metric_families = prometheus::gather();
+    let tokens = match config.github.resolved_tokens() {
+        Ok(t) => t,
+        Err(_err) => {
+            return Json(RateLimitsResponse {
+                tokens: vec![TokenRateLimit {
+                    token: "<config-error>".to_string(),
+                    budget: "n/a".to_string(),
+                    limit: 0,
+                    remaining: 0,
+                }],
+            })
+        }
+    };
 
-    // Map (token, budget) -> (limit, remaining)
-    let mut limits: HashMap<(String, String), (i64, i64)> = HashMap::new();
+    let mut builder = reqwest::Client::builder().user_agent(config.github.user_agent.clone());
 
-    for mf in &metric_families {
-        match mf.get_name() {
-            "gh_broker_rate_limit" => {
-                for m in mf.get_metric() {
-                    let mut token = String::new();
-                    let mut budget = String::new();
-                    for label in m.get_label() {
-                        match label.get_name() {
-                            "token" => token = label.get_value().to_string(),
-                            "budget" => budget = label.get_value().to_string(),
-                            _ => {}
-                        }
-                    }
-                    if !token.is_empty() && !budget.is_empty() {
-                        let limit = m.get_gauge().get_value() as i64;
-                        let entry = limits.entry((token, budget)).or_insert((0, 0));
-                        entry.0 = limit;
-                    }
-                }
-            }
-            "gh_broker_rate_remaining" => {
-                for m in mf.get_metric() {
-                    let mut token = String::new();
-                    let mut budget = String::new();
-                    for label in m.get_label() {
-                        match label.get_name() {
-                            "token" => token = label.get_value().to_string(),
-                            "budget" => budget = label.get_value().to_string(),
-                            _ => {}
-                        }
-                    }
-                    if !token.is_empty() && !budget.is_empty() {
-                        let remaining = m.get_gauge().get_value() as i64;
-                        let entry = limits.entry((token, budget)).or_insert((0, 0));
-                        entry.1 = remaining;
-                    }
-                }
-            }
-            _ => {}
+    if let Ok(proxy) = std::env::var("HTTPS_PROXY")
+        .or_else(|_| std::env::var("https_proxy"))
+        .or_else(|_| std::env::var("HTTP_PROXY"))
+        .or_else(|_| std::env::var("http_proxy"))
+    {
+        if let Ok(p) = reqwest::Proxy::all(&proxy) {
+            builder = builder.proxy(p);
         }
     }
 
-    let tokens = limits
-        .into_iter()
-        .map(|((token, budget), (limit, remaining))| TokenRateLimit {
-            token,
-            budget,
-            limit,
-            remaining,
-        })
-        .collect();
+    let client = match builder.build() {
+        Ok(c) => c,
+        Err(_) => {
+            return Json(RateLimitsResponse { tokens: Vec::new() });
+        }
+    };
 
-    Json(RateLimitsResponse { tokens })
+    let mut out = Vec::new();
+
+    for token in tokens {
+        let resp = match client
+            .get("https://api.github.com/rate_limit")
+            .bearer_auth(&token.secret)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(_err) => continue,
+        };
+
+        let status = resp.status();
+        let body_text = resp.text().await.unwrap_or_default();
+
+        if !status.is_success() {
+            // Surface non-success statuses as synthetic entries per token.
+            out.push(TokenRateLimit {
+                token: token.id.clone(),
+                budget: format!("status {}", status.as_u16()),
+                limit: 0,
+                remaining: 0,
+            });
+            continue;
+        }
+
+        let parsed: Value = match serde_json::from_str(&body_text) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        if let Some(resources) = parsed.get("resources") {
+            for budget_key in ["core", "graphql", "search"] {
+                if let Some(b) = resources.get(budget_key) {
+                    let limit = b.get("limit").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let remaining = b.get("remaining").and_then(|v| v.as_i64()).unwrap_or(0);
+                    out.push(TokenRateLimit {
+                        token: token.id.clone(),
+                        budget: budget_key.to_string(),
+                        limit,
+                        remaining,
+                    });
+                }
+            }
+        }
+    }
+
+    Json(RateLimitsResponse { tokens: out })
 }
 
 fn map_queue_bounds(bounds: &HashMap<String, usize>) -> HashMap<(Budget, Priority), usize> {
