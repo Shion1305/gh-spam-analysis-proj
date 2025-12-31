@@ -294,7 +294,7 @@ async fn rate_limits() -> Json<RateLimitsResponse> {
     for token in tokens {
         let resp = match client
             .get("https://api.github.com/rate_limit")
-            .bearer_auth(&token.secret)
+            .header("Authorization", format!("token {}", token.secret))
             .send()
             .await
         {
