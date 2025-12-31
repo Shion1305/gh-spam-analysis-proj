@@ -112,9 +112,19 @@ async fn verify_github_tokens(config: &AppConfig, tokens: &[GithubToken]) -> Res
     use http::header;
     use http::StatusCode;
 
-    let client = reqwest::Client::builder()
-        .user_agent(config.github.user_agent.clone())
-        .build()?;
+    let mut builder = reqwest::Client::builder().user_agent(config.github.user_agent.clone());
+
+    if let Ok(proxy) = std::env::var("HTTPS_PROXY")
+        .or_else(|_| std::env::var("https_proxy"))
+        .or_else(|_| std::env::var("HTTP_PROXY"))
+        .or_else(|_| std::env::var("http_proxy"))
+    {
+        if let Ok(p) = reqwest::Proxy::all(&proxy) {
+            builder = builder.proxy(p);
+        }
+    }
+
+    let client = builder.build()?;
 
     let mut valid_count = 0usize;
     for token in tokens {

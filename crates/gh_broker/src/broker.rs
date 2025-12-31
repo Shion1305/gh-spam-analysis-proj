@@ -34,10 +34,22 @@ impl Default for ReqwestExecutor {
 
 impl ReqwestExecutor {
     pub fn new() -> Self {
-        let client = reqwest::Client::builder()
-            .user_agent("github-spam-lab")
-            .build()
-            .expect("reqwest client");
+        let mut builder = reqwest::Client::builder().user_agent("github-spam-lab");
+
+        // Honour standard proxy environment variables so all outbound
+        // GitHub traffic can be routed through an HTTP CONNECT proxy
+        // such as instance-k8s-proxy.
+        if let Ok(proxy) = std::env::var("HTTPS_PROXY")
+            .or_else(|_| std::env::var("https_proxy"))
+            .or_else(|_| std::env::var("HTTP_PROXY"))
+            .or_else(|_| std::env::var("http_proxy"))
+        {
+            if let Ok(p) = reqwest::Proxy::all(&proxy) {
+                builder = builder.proxy(p);
+            }
+        }
+
+        let client = builder.build().expect("reqwest client");
         Self { client }
     }
 }
