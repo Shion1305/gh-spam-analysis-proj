@@ -44,6 +44,12 @@ spec:
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+          volumeMounts:
+            {{- if .Values.config.existingConfigMap }}
+            - name: app-config
+              mountPath: /srv/app/config
+              readOnly: true
+            {{- end }}
           ports:
             - containerPort: {{ .Values.api.service.port }}
               name: http
@@ -63,3 +69,9 @@ spec:
         {{- toYaml .Values.tolerations | nindent 8 }}
       affinity:
         {{- toYaml .Values.affinity | nindent 8 }}
+      volumes:
+        {{- if .Values.config.existingConfigMap }}
+        - name: app-config
+          configMap:
+            name: {{ .Values.config.existingConfigMap }}
+        {{- end }}

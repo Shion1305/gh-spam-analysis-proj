@@ -50,6 +50,12 @@ github:
   tokenSecretsKey: "GITHUB__TOKEN_SECRETS"
   userAgentKey: "GITHUB__USER_AGENT"
 
+config:
+  # Name of an existing ConfigMap that contains application configuration files
+  # (e.g., default.toml) mounted at /srv/app/config.
+  # When set, this ConfigMap will be mounted into both the API and collector pods.
+  existingConfigMap: ""
+
 extraEnv: []
 fullnameOverride: ""
 nameOverride: ""

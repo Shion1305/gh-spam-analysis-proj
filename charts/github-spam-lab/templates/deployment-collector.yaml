@@ -56,6 +56,18 @@ spec:
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+          volumeMounts:
+            {{- if .Values.config.existingConfigMap }}
+            - name: app-config
+              mountPath: /srv/app/config
+              readOnly: true
+            {{- end }}
           resources:
             {{- toYaml .Values.collector.resources | nindent 12 }}
+      volumes:
+        {{- if .Values.config.existingConfigMap }}
+        - name: app-config
+          configMap:
+            name: {{ .Values.config.existingConfigMap }}
+        {{- end }}
 {{- end }}
