@@ -73,10 +73,15 @@ pub struct GithubConfig {
     #[serde_as(as = "StringWithSeparator::<CommaSeparator, String>")]
     #[serde(default)]
     pub token_secrets: Vec<String>,
+    #[serde(default = "GithubConfig::default_user_agent")]
     pub user_agent: String,
 }
 
 impl GithubConfig {
+    fn default_user_agent() -> String {
+        "github-spam-lab".to_string()
+    }
+
     pub fn resolved_tokens(&self) -> Result<Vec<GithubToken>, ConfigError> {
         if !self.tokens.is_empty() {
             return Ok(self.tokens.clone());
