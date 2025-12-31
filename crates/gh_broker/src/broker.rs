@@ -676,7 +676,10 @@ async fn execute_once(
                 .with_label_values(&[budget_label(budget), &token.id, status_class(status)])
                 .inc();
 
-            if let Some(update) = parse_rate_limit(resp.headers()) {
+            let headers = resp.headers().clone();
+            let rate_info = parse_rate_limit(&headers);
+
+            if let Some(ref update) = rate_info {
                 inner
                     .token_pool
                     .update(budget, &token.id, update.clone())
@@ -710,8 +713,6 @@ async fn execute_once(
                     });
                 }
             }
-
-            let headers = resp.headers().clone();
 
             if status.is_success() {
                 let cache_key = request.key().to_string();
@@ -767,7 +768,6 @@ async fn execute_once(
             }
 
             if let Some(retry) = parse_retry_after(&headers) {
-                let rate_info = parse_rate_limit(&headers);
                 warn!(
                     status = %status,
                     request = %request.key(),
