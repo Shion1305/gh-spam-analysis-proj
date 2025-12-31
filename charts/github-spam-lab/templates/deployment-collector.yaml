@@ -50,11 +50,11 @@ spec:
                   name: {{ .Values.github.existingSecret }}
                   key: {{ .Values.github.userAgentKey | default "GITHUB__USER_AGENT" | quote }}
             {{- end }}
-            {{- range .Values.collector.env }}
-            - {{- toYaml . | nindent 12 }}
+            {{- with .Values.collector.env }}
+            {{- toYaml . | nindent 12 }}
             {{- end }}
-            {{- range .Values.extraEnv }}
-            - {{- toYaml . | nindent 12 }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
             {{- end }}
           resources:
             {{- toYaml .Values.collector.resources | nindent 12 }}

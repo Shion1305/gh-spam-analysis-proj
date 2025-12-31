@@ -37,12 +37,12 @@ spec:
                   key: {{ .Values.postgres.existingSecretKey | default "DATABASE__URL" | quote }}
             {{- end }}
             - name: API__BIND
-              value: {{ printf "0.0.0.0:%d" .Values.api.service.port | quote }}
-            {{- range .Values.api.env }}
-            - {{- toYaml . | nindent 14 }}
+              value: {{ printf "0.0.0.0:%v" .Values.api.service.port | quote }}
+            {{- with .Values.api.env }}
+            {{- toYaml . | nindent 12 }}
             {{- end }}
-            {{- range .Values.extraEnv }}
-            - {{- toYaml . | nindent 14 }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
             {{- end }}
           ports:
             - containerPort: {{ .Values.api.service.port }}
