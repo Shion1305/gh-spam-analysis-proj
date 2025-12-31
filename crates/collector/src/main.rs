@@ -7,7 +7,7 @@ use anyhow::{anyhow, Result};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use axum::Router;
+use axum::{Json, Router};
 use collector::{
     fetcher::{DataFetcher, GraphqlDataFetcher, RestDataFetcher},
     BrokerGithubClient, Collector, GithubClient,
@@ -20,6 +20,7 @@ use db::pg::PgDatabase;
 use db::Repositories;
 use gh_broker::{Budget, GithubBrokerBuilder, GithubToken as BrokerToken, Priority};
 use prometheus::Encoder;
+use serde::Serialize;
 use tracing::{info, warn};
 
 #[tokio::main]
@@ -30,6 +31,12 @@ async fn main() -> Result<()> {
     if tokens.is_empty() {
         return Err(anyhow!("no GitHub tokens configured"));
     }
+
+    info!(
+        token_ids = ?tokens.iter().map(|t| t.id.clone()).collect::<Vec<_>>(),
+        user_agent = %config.github.user_agent,
+        "GitHub tokens configured for collector"
+    );
 
     verify_github_tokens(&config, &tokens).await?;
 
@@ -139,12 +146,21 @@ async fn verify_github_tokens(config: &AppConfig, tokens: &[GithubToken]) -> Res
             valid_count += 1;
             info!(
                 token_id = %token.id,
+                status = %status,
                 "GitHub token verified successfully"
             );
             continue;
         }
 
+        let body = resp.text().await.unwrap_or_default();
+
         if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+            warn!(
+                token_id = %token.id,
+                status = %status,
+                body_preview = %body.chars().take(256).collect::<String>(),
+                "GitHub token failed verification with auth error"
+            );
             return Err(anyhow!(
                 "GitHub token {} failed verification with status {}",
                 token.id,
@@ -155,6 +171,7 @@ async fn verify_github_tokens(config: &AppConfig, tokens: &[GithubToken]) -> Res
         warn!(
             token_id = %token.id,
             status = %status,
+            body_preview = %body.chars().take(256).collect::<String>(),
             "GitHub token verification returned non-success status"
         );
     }
@@ -171,7 +188,8 @@ async fn verify_github_tokens(config: &AppConfig, tokens: &[GithubToken]) -> Res
 async fn serve_metrics(addr: SocketAddr, metrics_path: &'static str) -> Result<()> {
     let app = Router::new()
         .route("/healthz", get(healthz))
-        .route(metrics_path, get(export_metrics));
+        .route(metrics_path, get(export_metrics))
+        .route("/rate_limits", get(rate_limits));
     let listener = tokio::net::TcpListener::bind(addr).await?;
     info!(
         address = %addr,
@@ -211,6 +229,82 @@ async fn export_metrics() -> Response {
                 .into_response()
         }
     }
+}
+
+#[derive(Debug, Serialize)]
+struct TokenRateLimit {
+    token: String,
+    budget: String,
+    limit: i64,
+    remaining: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct RateLimitsResponse {
+    tokens: Vec<TokenRateLimit>,
+}
+
+async fn rate_limits() -> Json<RateLimitsResponse> {
+    use std::collections::HashMap;
+
+    let metric_families = prometheus::gather();
+
+    // Map (token, budget) -> (limit, remaining)
+    let mut limits: HashMap<(String, String), (i64, i64)> = HashMap::new();
+
+    for mf in &metric_families {
+        match mf.get_name() {
+            "gh_broker_rate_limit" => {
+                for m in mf.get_metric() {
+                    let mut token = String::new();
+                    let mut budget = String::new();
+                    for label in m.get_label() {
+                        match label.get_name() {
+                            "token" => token = label.get_value().to_string(),
+                            "budget" => budget = label.get_value().to_string(),
+                            _ => {}
+                        }
+                    }
+                    if !token.is_empty() && !budget.is_empty() {
+                        let limit = m.get_gauge().get_value() as i64;
+                        let entry = limits.entry((token, budget)).or_insert((0, 0));
+                        entry.0 = limit;
+                    }
+                }
+            }
+            "gh_broker_rate_remaining" => {
+                for m in mf.get_metric() {
+                    let mut token = String::new();
+                    let mut budget = String::new();
+                    for label in m.get_label() {
+                        match label.get_name() {
+                            "token" => token = label.get_value().to_string(),
+                            "budget" => budget = label.get_value().to_string(),
+                            _ => {}
+                        }
+                    }
+                    if !token.is_empty() && !budget.is_empty() {
+                        let remaining = m.get_gauge().get_value() as i64;
+                        let entry = limits.entry((token, budget)).or_insert((0, 0));
+                        entry.1 = remaining;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let tokens = limits
+        .into_iter()
+        .map(|((token, budget), (limit, remaining))| TokenRateLimit {
+            token,
+            budget,
+            limit,
+            remaining,
+        })
+        .collect();
+
+    Json(RateLimitsResponse { tokens })
 }
 
 fn map_queue_bounds(bounds: &HashMap<String, usize>) -> HashMap<(Budget, Priority), usize> {

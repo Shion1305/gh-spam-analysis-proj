@@ -8,7 +8,7 @@ use futures::FutureExt;
 use http::{header, HeaderValue, Request, Response, StatusCode};
 use tokio::sync::{mpsc, oneshot, Mutex, Semaphore};
 use tokio::time::sleep;
-use tracing::warn;
+use tracing::{debug, warn};
 
 use crate::backoff::exponential_jitter_backoff;
 use crate::cache::{CachedResponse, ResponseCache};
@@ -641,6 +641,14 @@ async fn execute_once(
         }
     };
 
+    debug!(
+        budget = ?budget,
+        priority = %request.priority.as_str(),
+        token_id = %token.id,
+        request = %request.key(),
+        "selected GitHub token for request"
+    );
+
     request.headers_mut().insert(
         header::AUTHORIZATION,
         HeaderValue::from_str(&format!("token {}", token.secret))?,
@@ -765,6 +773,7 @@ async fn execute_once(
                     request = %request.key(),
                     budget = ?budget,
                     priority = %request.priority.as_str(),
+                    token_id = %token.id,
                     github_request_id = headers
                         .get("x-github-request-id")
                         .and_then(|v| v.to_str().ok())
@@ -790,6 +799,7 @@ async fn execute_once(
                     request = %request.key(),
                     budget = ?budget,
                     priority = %request.priority.as_str(),
+                    token_id = %token.id,
                     github_request_id = headers
                         .get("x-github-request-id")
                         .and_then(|v| v.to_str().ok())
@@ -819,6 +829,7 @@ async fn execute_once(
                 request = %request.key(),
                 budget = ?budget,
                 priority = %request.priority.as_str(),
+                token_id = %token.id,
                 github_request_id = request_id,
                 rate_limit_remaining = rate_info.as_ref().map(|data| data.remaining),
                 rate_limit_reset = rate_info

@@ -289,7 +289,16 @@ impl Collector {
                                 _ => {}
                             }
                         }
-                        warn!(job_id = job.id, owner = %seed.owner, repo = %seed.name, error = ?err, status_code = error_details.status.map(|s| s.as_u16()), endpoint = error_details.endpoint.as_deref().unwrap_or("-"), context = error_details.context.as_deref().unwrap_or("-"), "job failed");
+                        warn!(
+                            job_id = job.id,
+                            owner = %seed.owner,
+                            repo = %seed.name,
+                            error = ?err,
+                            status_code = error_details.status.map(|s| s.as_u16()),
+                            endpoint = error_details.endpoint.as_deref().unwrap_or("-"),
+                            context = error_details.context.as_deref().unwrap_or("-"),
+                            "job failed"
+                        );
                     }
                 }
             });
