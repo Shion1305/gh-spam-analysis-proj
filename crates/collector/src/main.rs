@@ -13,7 +13,7 @@ use collector::{
     BrokerGithubClient, Collector, GithubClient,
 };
 use common::{
-    config::{AppConfig, FetchMode},
+    config::{AppConfig, FetchMode, GithubToken},
     logging,
 };
 use db::pg::PgDatabase;
@@ -30,6 +30,8 @@ async fn main() -> Result<()> {
     if tokens.is_empty() {
         return Err(anyhow!("no GitHub tokens configured"));
     }
+
+    verify_github_tokens(&config, &tokens).await?;
 
     let broker_tokens: Vec<BrokerToken> = tokens
         .into_iter()
@@ -103,6 +105,56 @@ async fn main() -> Result<()> {
     collector.run().await?;
     // Ensure any remaining spans are flushed on shutdown (no-op if otel disabled)
     common::logging::shutdown_tracer_provider();
+    Ok(())
+}
+
+async fn verify_github_tokens(config: &AppConfig, tokens: &[GithubToken]) -> Result<()> {
+    use http::header;
+    use http::StatusCode;
+
+    let client = reqwest::Client::builder()
+        .user_agent(config.github.user_agent.clone())
+        .build()?;
+
+    let mut valid_count = 0usize;
+    for token in tokens {
+        let resp = client
+            .get("https://api.github.com/rate_limit")
+            .header(header::AUTHORIZATION, format!("token {}", token.secret))
+            .send()
+            .await?;
+
+        let status = resp.status();
+        if status.is_success() {
+            valid_count += 1;
+            info!(
+                token_id = %token.id,
+                "GitHub token verified successfully"
+            );
+            continue;
+        }
+
+        if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+            return Err(anyhow!(
+                "GitHub token {} failed verification with status {}",
+                token.id,
+                status
+            ));
+        }
+
+        warn!(
+            token_id = %token.id,
+            status = %status,
+            "GitHub token verification returned non-success status"
+        );
+    }
+
+    if valid_count == 0 {
+        return Err(anyhow!(
+            "no valid GitHub tokens after verification; check scopes and configuration"
+        ));
+    }
+
     Ok(())
 }
 

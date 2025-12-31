@@ -217,6 +217,44 @@ async fn setup_app(jobs: Vec<CollectionJobRow>) -> Router {
         repositories: repos,
         metrics_path: "/metrics",
         pool: Arc::new(pool),
+        config: common::config::AppConfig {
+            database: common::config::DatabaseConfig {
+                url: "postgres://postgres:postgres@localhost:5432/github_spam".to_string(),
+                test_admin_url: None,
+            },
+            github: common::config::GithubConfig {
+                tokens: Vec::new(),
+                token_ids: Vec::new(),
+                token_secrets: Vec::new(),
+                user_agent: "test-agent".to_string(),
+            },
+            collector: common::config::CollectorConfig {
+                interval_secs: 60,
+                page_size: 100,
+                run_once: false,
+                fetch_mode: common::config::FetchMode::Hybrid,
+                max_concurrent_repos: 4,
+            },
+            broker: common::config::BrokerConfig {
+                max_inflight: 32,
+                per_repo_inflight: 2,
+                distributed: false,
+                cache_capacity: 5000,
+                cache_ttl_secs: 600,
+                backoff_base_ms: 500,
+                backoff_max_ms: 60_000,
+                jitter_frac: 0.2,
+                weights: std::collections::HashMap::new(),
+                queue_bounds: std::collections::HashMap::new(),
+            },
+            api: common::config::ApiConfig {
+                bind: "0.0.0.0:3000".to_string(),
+            },
+            observability: common::config::ObservabilityConfig {
+                metrics_path: "/metrics".to_string(),
+                metrics_bind: "0.0.0.0:9091".to_string(),
+            },
+        },
     });
     build_router(state)
 }

@@ -5,6 +5,7 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
 use chrono::{DateTime, NaiveDate, Utc};
+use common::config::AppConfig;
 use db::models::{CollectionJobCreate, IssueQuery, SpamFilter};
 use db::Repositories;
 use once_cell::sync::Lazy;
@@ -22,12 +23,14 @@ pub struct ApiState {
     pub repositories: Arc<dyn Repositories>,
     pub metrics_path: &'static str,
     pub pool: Arc<PgPool>,
+    pub config: AppConfig,
 }
 
 pub fn build_router(state: Arc<ApiState>) -> Router {
     let metrics_path: &'static str = state.metrics_path;
     Router::new()
         .route("/healthz", get(healthz))
+        .route("/config/status", get(config_status))
         .route("/repos", get(list_repos).post(register_repo))
         .route("/collection-jobs", get(list_collection_jobs))
         .route("/issues", get(list_issues))
@@ -154,6 +157,66 @@ async fn refresh_repo_entity_counts(pool: &PgPool) -> Result<(), String> {
 
 async fn healthz() -> impl IntoResponse {
     Json(json!({ "status": "ok" }))
+}
+
+#[derive(Debug, Serialize)]
+struct DatabaseStatus {
+    ok: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct GithubStatus {
+    user_agent: String,
+    token_ids_count: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct CollectorStatus {
+    interval_secs: u64,
+    page_size: u32,
+    fetch_mode: String,
+    max_concurrent_repos: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct ConfigStatusResponse {
+    database: DatabaseStatus,
+    github: GithubStatus,
+    collector: CollectorStatus,
+}
+
+#[instrument(skip(state))]
+async fn config_status(
+    State(state): State<Arc<ApiState>>,
+) -> ApiResult<Json<ConfigStatusResponse>> {
+    let db_ok = sqlx::query("SELECT 1").execute(&*state.pool).await.is_ok();
+
+    let AppConfig {
+        database: _,
+        github,
+        collector,
+        broker: _,
+        api: _,
+        observability: _,
+    } = &state.config;
+
+    let github_status = GithubStatus {
+        user_agent: github.user_agent.clone(),
+        token_ids_count: github.token_ids.len(),
+    };
+
+    let collector_status = CollectorStatus {
+        interval_secs: collector.interval_secs,
+        page_size: collector.page_size,
+        fetch_mode: format!("{:?}", collector.fetch_mode),
+        max_concurrent_repos: collector.max_concurrent_repos,
+    };
+
+    Ok(Json(ConfigStatusResponse {
+        database: DatabaseStatus { ok: db_ok },
+        github: github_status,
+        collector: collector_status,
+    }))
 }
 
 #[derive(Debug, Deserialize)]
