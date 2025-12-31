@@ -1,0 +1,11 @@
+FROM debian:bookworm-slim AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
+ENV RUST_LOG=info
+WORKDIR /srv/app
+
+# Binaries are built on the CI runner and made available in the build context
+COPY target/release/api /usr/local/bin/api
+COPY target/release/collector /usr/local/bin/collector
+
+CMD ["/usr/local/bin/api"]
+
