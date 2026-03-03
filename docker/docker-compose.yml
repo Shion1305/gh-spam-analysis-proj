@@ -152,7 +152,7 @@ services:
       - "9093:9093"
 
   loki:
-    image: grafana/loki:2.9.7
+    image: grafana/loki:2.9.17
     command: ["-config.file=/etc/loki/config.yml"]
     volumes:
       - ./obs/loki-config.yaml:/etc/loki/config.yml:ro
