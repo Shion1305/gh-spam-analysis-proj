@@ -16,5 +16,4 @@ packages:
   - name: nextest-rs/nextest@v0.1.7
   - name: redis/redis@7.2.0
   - name: edenhill/kcat@1.7.1
-  - name: prometheus/prometheus@v2.48.0
   - name: direnv/direnv@v2.37.1
