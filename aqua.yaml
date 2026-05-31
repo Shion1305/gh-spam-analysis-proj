@@ -9,7 +9,7 @@
 #   - all
 registries:
 - type: standard
-  ref: v4.428.0 # renovate: depName=aquaproj/aqua-registry
+  ref: v4.519.0 # renovate: depName=aquaproj/aqua-registry
 packages:
   - name: casey/just@1.23.0
   - name: launchbadge/sqlx-cli@v0.7.3
