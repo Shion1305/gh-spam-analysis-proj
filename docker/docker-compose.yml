@@ -118,7 +118,7 @@ services:
         condition: service_started
 
   grafana:
-    image: grafana/grafana:10.2.0
+    image: grafana/grafana:10.4.19
     env_file: .env
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: 'true'
