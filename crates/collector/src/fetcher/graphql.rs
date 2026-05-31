@@ -973,7 +973,7 @@ impl DataFetcher for GraphqlDataFetcher {
         }
 
         // Sort items by updated_at desc (best-effort)
-        items.sort_by(|a, b| b.issue.updated_at.cmp(&a.issue.updated_at));
+        items.sort_by_key(|b| std::cmp::Reverse(b.issue.updated_at));
 
         let combined_cursor = if next_cursor.is_some() || pulls_cursor.is_some() {
             Some(format!(
