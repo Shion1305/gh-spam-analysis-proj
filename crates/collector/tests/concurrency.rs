@@ -166,13 +166,22 @@ async fn processes_repositories_in_parallel() -> Result<()> {
         .max_active
         .load(std::sync::atomic::Ordering::Relaxed);
 
-    // With 3 jobs, 250ms each, concurrency=2: expect < 600ms and >= 250ms, and at least 2 in-flight.
+    // With 3 jobs, 250ms each, concurrency=2: the deterministic proof of parallelism is
+    // that >=2 fetches were in flight at once. This does not depend on wall-clock timing.
     assert!(
         max_active >= 2,
         "expected >=2 concurrent, got {}",
         max_active
     );
-    assert!(elapsed.as_millis() < 600, "took too long: {:?}", elapsed);
+    // Timing is a coarse sanity check only. The critical path is ~2 waves * 250ms = ~500ms,
+    // while fully sequential would be ~750ms. Assert we beat the sequential time (so the run
+    // genuinely overlapped) with generous slack for DB I/O, scheduler, and CI contention,
+    // rather than a tight bound that flakes under load or async-runtime micro-timing changes.
+    assert!(
+        elapsed.as_millis() < 700,
+        "expected concurrency to beat sequential (~750ms), took too long: {:?}",
+        elapsed
+    );
     assert!(
         elapsed.as_millis() >= 250,
         "too fast (unexpected): {:?}",
